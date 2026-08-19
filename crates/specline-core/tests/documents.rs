@@ -702,7 +702,7 @@ fn reembed_gives_every_vectorless_revision_a_vector() {
     let embedder = HashEmbedder::new();
     let mut steps = Vec::new();
     let report = store
-        .reembed_missing(&embedder, |done, total| steps.push((done, total)))
+        .reembed_missing(&embedder, None, |done, total| steps.push((done, total)))
         .unwrap();
 
     assert_eq!(report.missing, 3);
@@ -759,8 +759,8 @@ fn a_second_reembed_pass_has_nothing_to_do() {
         .unwrap();
 
     let embedder = HashEmbedder::new();
-    store.reembed_missing(&embedder, |_, _| {}).unwrap();
-    let again = store.reembed_missing(&embedder, |_, _| {}).unwrap();
+    store.reembed_missing(&embedder, None, |_, _| {}).unwrap();
+    let again = store.reembed_missing(&embedder, None, |_, _| {}).unwrap();
 
     assert_eq!(again.missing, 0);
     assert_eq!(again.embedded, 0);
@@ -813,7 +813,7 @@ fn reembed_leaves_archived_documents_alone() {
     assert_eq!(missing, 1);
 
     let embedder = HashEmbedder::new();
-    let report = store.reembed_missing(&embedder, |_, _| {}).unwrap();
+    let report = store.reembed_missing(&embedder, None, |_, _| {}).unwrap();
     assert_eq!(report.missing, 1, "only the live spec was pending");
     assert_eq!(report.embedded, 1);
 
@@ -937,7 +937,7 @@ fn a_passage_can_always_be_rebuilt_from_its_revision() {
     assert!(passages(&f.store, &id).is_empty());
 
     let embedder = HashEmbedder::new();
-    let report = f.store.reembed_missing(&embedder, |_, _| {}).unwrap();
+    let report = f.store.reembed_missing(&embedder, None, |_, _| {}).unwrap();
     assert_eq!(report.embedded, 1, "the revision should have been rebuilt");
 
     let after = passages(&f.store, &id);
@@ -1045,7 +1045,7 @@ fn changing_the_model_makes_every_document_missing_again() {
         "under the new model the document has no passages and must be rebuilt"
     );
 
-    let report = f.store.reembed_missing(&renamed, |_, _| {}).unwrap();
+    let report = f.store.reembed_missing(&renamed, None, |_, _| {}).unwrap();
     assert_eq!(report.embedded, 1);
 
     // Rebuilt, not accumulated: the old model's passages are gone rather than

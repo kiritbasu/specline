@@ -62,9 +62,11 @@ Start the daemon:
 specline-daemon
 ```
 
-It binds `127.0.0.1:7654` and stays there. Add `--embeddings` to enable semantic
-search; the first run downloads the model, and search works without it in the
-meantime.
+It binds `127.0.0.1:7654` and stays there. On the first start it downloads the
+embedding model — 127 MB, once — so that search matches by meaning as well as by
+word, and it embeds anything already in the store that has no vector yet. Search
+answers from the keyword half throughout, including while the model is on its
+way. `--no-embeddings` turns all of that off.
 
 Nothing supervises it. There is no launchd job and no `specline restart` — if it
 stops, start it again the same way.

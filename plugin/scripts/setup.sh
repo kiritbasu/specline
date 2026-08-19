@@ -62,7 +62,11 @@ SPECLINE_HOME_DIR="${SPECLINE_HOME:-$HOME/.specline}"
 DAEMON_URL="http://127.0.0.1:$PORT"
 
 DRY_RUN=false
-EMBEDDINGS=false
+# On by default since B-95. It was opt-in, and nobody opted in — including the
+# person who wrote it — so every install had keyword search wearing the name of
+# a hybrid one. `--no-embeddings` is the way out, and the first start downloads
+# 127 MB.
+EMBEDDINGS=true
 INSTALL_SERVICE=true
 # The one thing Specline does that leaves this machine, and the one thing somebody
 # installing a local-first tool would want to be asked about. On by default and
@@ -73,6 +77,7 @@ for arg in "$@"; do
     case "$arg" in
         --dry-run)     DRY_RUN=true ;;
         --embeddings)  EMBEDDINGS=true ;;
+        --no-embeddings) EMBEDDINGS=false ;;
         --no-service)  INSTALL_SERVICE=false ;;
         --no-update-check) UPDATE_CHECK=false ;;
         -h|--help)     sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -309,8 +314,8 @@ install_launchd() {
     [ "$UPDATE_CHECK" = false ] && update_env="
         <key>SPECLINE_AUTO_UPDATE</key><string>0</string>"
     local args="<string>$daemon_bin</string>"
-    [ "$EMBEDDINGS" = true ] && args="$args
-        <string>--embeddings</string>"
+    [ "$EMBEDDINGS" = false ] && args="$args
+        <string>--no-embeddings</string>"
 
     mkdir -p "$HOME/Library/LaunchAgents"
     cat > "$plist" <<PLIST
@@ -346,7 +351,7 @@ install_systemd() {
     local update_env=""
     [ "$UPDATE_CHECK" = false ] && update_env="Environment=SPECLINE_AUTO_UPDATE=0"
     local exec="$daemon_bin"
-    [ "$EMBEDDINGS" = true ] && exec="$exec --embeddings"
+    [ "$EMBEDDINGS" = false ] && exec="$exec --no-embeddings"
 
     mkdir -p "$HOME/.config/systemd/user"
     cat > "$unit" <<UNIT
@@ -399,7 +404,7 @@ if [ "$DRY_RUN" = true ]; then
 else
     if [ "$INSTALL_SERVICE" = false ]; then
         embed_flag=""
-        [ "$EMBEDDINGS" = true ] && embed_flag="--embeddings"
+        [ "$EMBEDDINGS" = false ] && embed_flag="--no-embeddings"
         auto_update=1
         [ "$UPDATE_CHECK" = false ] && auto_update=0
         SPECLINE_HOME="$SPECLINE_HOME_DIR" SPECLINE_AUTO_UPDATE="$auto_update" \
@@ -431,7 +436,9 @@ printf '  Store      %s\n' "$SPECLINE_HOME_DIR"
 printf '  Daemon     %s\n' "$DAEMON_URL"
 printf '  Interface  specline ui\n'
 printf '  Embeddings %s\n' \
-    "$([ "$EMBEDDINGS" = true ] && echo "on" || echo "off — keyword search works either way")"
+    "$([ "$EMBEDDINGS" = true ] \
+        && echo "on — the first start downloads a 127 MB model" \
+        || echo "off — keyword search works either way")"
 printf '  Updates    %s\n\n' \
     "$([ "$UPDATE_CHECK" = true ] \
         && echo "checks every half hour for a new release — see below" \
@@ -454,6 +461,6 @@ printf '  \033[1mRestart Claude Code now.\033[0m MCP servers are connected at st
 printf '  and nothing was listening when this session began — so the specline_* tools\n'
 printf '  will not appear until you do.\n\n'
 
-[ "$EMBEDDINGS" = false ] && printf '  For semantic search as well as keyword: re-run with --embeddings\n  (the first start downloads a 133 MB model).\n\n'
+[ "$EMBEDDINGS" = false ] && printf '  Search will be keyword-only. For meaning as well as words, re-run\n  without --no-embeddings (the first start downloads a 127 MB model).\n\n'
 
 exit 0

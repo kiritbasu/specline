@@ -164,11 +164,22 @@ impl AppState {
             );
         }
         match store.documents_missing_embeddings(None) {
+            // Said either way, because the count is the same finding — but the
+            // instruction only belongs in the half where nobody else is going
+            // to act on it. A daemon that is about to embed these itself should
+            // not be telling somebody to go and do it.
+            Ok((current, missing)) if missing > 0 && embeddings => tracing::info!(
+                current,
+                missing,
+                "{missing} of {current} current document(s) have no vector; embedding them in \
+                 the background once the model has loaded"
+            ),
             Ok((current, missing)) if missing > 0 => tracing::warn!(
                 current,
                 missing,
                 "{missing} of {current} current document(s) have no vector, so the semantic \
-                 half of search cannot see them. Run `specline reembed --missing`."
+                 half of search cannot see them. Start without `--no-embeddings`, or run \
+                 `specline reembed --missing`."
             ),
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "could not count the missing embeddings"),
@@ -245,21 +256,23 @@ impl AppState {
             std::fs::create_dir_all(&models).ok();
             match specline_embed::FastEmbedder::new(&models) {
                 Ok(e) => {
+                    let embedder: Arc<dyn specline_core::Embedder> = Arc::new(e);
                     // Taking the lock here is safe and brief: it is one field
                     // assignment, and by now the daemon is already serving.
                     match store.lock() {
                         Ok(mut guard) => {
-                            guard.set_embedder(Arc::new(e));
+                            guard.set_embedder(embedder.clone());
                             tracing::info!(
                                 dir = %models.display(),
                                 "embedding model loaded; semantic search is live"
                             );
                         }
                         Err(poisoned) => {
-                            poisoned.into_inner().set_embedder(Arc::new(e));
+                            poisoned.into_inner().set_embedder(embedder.clone());
                             tracing::info!("embedding model loaded after a poisoned lock");
                         }
                     }
+                    Self::embed_the_backlog(&store, embedder.as_ref());
                 }
                 // Degrade rather than take the daemon down. Keyword search
                 // still works, and a daemon that dies because a model download
@@ -271,6 +284,85 @@ impl AppState {
                 ),
             }
         });
+    }
+
+    /// Give the documents that have no vector one, a slice at a time.
+    ///
+    /// Runs once, on the thread that loaded the model, after the model is
+    /// attached. Without it, turning embeddings on covers only what is written
+    /// *next*: everything already in the store stays invisible to the semantic
+    /// half for ever, because nothing rewrites those rows. That was a chore the
+    /// product handed the person who installed it — `specline reembed
+    /// --missing`, in a warning most people never read — and B-95 says the
+    /// product does it instead.
+    ///
+    /// **A slice at a time, because this holds the write lock.** Every request
+    /// queues behind it, and the whole backlog is minutes on a store of any
+    /// age. A batch is a fraction of a second, and the sleep between batches is
+    /// what lets a search that arrived meanwhile go first. Startup is exactly
+    /// when a session is asking its opening questions.
+    ///
+    /// It stops when a slice embeds nothing. That is both "the backlog is done"
+    /// and "what is left is what the model refuses", and the second is why the
+    /// condition is progress rather than an empty backlog — a document that
+    /// cannot be embedded stays selected by the query for ever, and looping on
+    /// it would be a daemon that spins a core until it is killed.
+    ///
+    /// Public so a test can drive it with a stub embedder. The alternative is
+    /// proving a loop terminates by downloading a 127 MB model first, which is
+    /// how a loop ends up not being tested at all.
+    #[cfg(feature = "embeddings")]
+    pub fn embed_the_backlog(
+        store: &Arc<Mutex<specline_core::Store>>,
+        embedder: &dyn specline_core::Embedder,
+    ) {
+        let mut embedded = 0usize;
+        loop {
+            let slice = {
+                let mut guard = match store.lock() {
+                    Ok(g) => g,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                guard.reembed_missing(
+                    embedder,
+                    Some(specline_core::store::docs::REEMBED_BATCH),
+                    |_, _| {},
+                )
+            };
+            match slice {
+                Ok(report) if report.embedded == 0 => {
+                    if embedded > 0 {
+                        tracing::info!(
+                            embedded,
+                            "backfilled the documents that had no vector; the whole store is \
+                             searchable by meaning now"
+                        );
+                    }
+                    if report.failed > 0 {
+                        tracing::warn!(
+                            refused = report.failed,
+                            "some revisions could not be embedded and stay keyword-searchable"
+                        );
+                    }
+                    return;
+                }
+                Ok(report) => embedded += report.embedded,
+                // A backfill is a repair, and a repair that fails leaves
+                // everything exactly as it was. Nothing here is worth taking
+                // the daemon down for.
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        embedded,
+                        "the embedding backfill stopped early; run `specline reembed --missing`"
+                    );
+                    return;
+                }
+            }
+            // Long enough for a waiting request to take the lock, short enough
+            // that a backlog still clears while somebody makes tea.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 
     /// Turn a search tool call's query text into a vector, before the store

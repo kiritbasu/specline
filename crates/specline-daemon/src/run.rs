@@ -47,11 +47,27 @@ struct Args {
     #[arg(long, env = "SPECLINE_BIND", default_value = "127.0.0.1:7654")]
     bind: SocketAddr,
 
-    /// Load the local embedding model, enabling semantic search.
+    /// Do not load the embedding model. Search will be keyword-only.
     ///
-    /// Off by default because the first run downloads it. Keyword search works
-    /// either way, so this degrades rather than breaking.
+    /// On by default since B-95: it was opt-in, and the thing that actually
+    /// happened is that nobody opted in — including on the machine this is
+    /// written on, where every search ran keyword-only against a store whose
+    /// vectors were all present and correct.
+    /// The first start downloads 127 MB, which is the reason this flag exists —
+    /// "not on this machine" is a real thing to want, and it should be one word
+    /// rather than a rebuild.
+    ///
+    /// Keyword search covers every artifact either way, so this degrades rather
+    /// than breaking.
     #[arg(long)]
+    no_embeddings: bool,
+
+    /// Accepted and ignored: embeddings are on by default now.
+    ///
+    /// Kept because service files on disk say `--embeddings`, and a daemon that
+    /// refuses to start after an upgrade — `unexpected argument` from launchd,
+    /// into a log nobody is watching — is a worse outcome than a dead flag.
+    #[arg(long, hide = true)]
     embeddings: bool,
 
     /// Serve to the network, not just this machine. Read the whole sentence.
@@ -137,7 +153,7 @@ pub async fn run() -> Result<()> {
         );
     }
 
-    let state = match AppState::open(&home, args.embeddings) {
+    let state = match AppState::open(&home, !args.no_embeddings) {
         Ok(state) => state,
         // Exit zero on a store that will not open, and do not pretend that is
         // success — say exactly what happened first.

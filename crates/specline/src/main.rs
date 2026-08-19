@@ -1695,7 +1695,7 @@ fn run_reembed(home: &Path, missing: bool, force: bool, json: bool) -> Result<()
         println!("embedding {absent} of {current} current document(s)");
     }
 
-    let report = store.reembed_missing(&embedder, |done, total| {
+    let report = store.reembed_missing(&embedder, None, |done, total| {
         if !json {
             println!("  {done}/{total}");
         }

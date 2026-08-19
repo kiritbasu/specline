@@ -201,8 +201,9 @@ cat <<EOF
 
        specline-daemon
 
-     Add --embeddings for semantic search. The first run downloads the model;
-     keyword search works either way.
+     It loads the embedding model on first start — 127 MB, downloaded once —
+     so search matches by meaning as well as by word. Add --no-embeddings if
+     you would rather it did not; keyword search works either way.
 
   2. Wire up the hooks. The files are installed; nothing runs them until
      $HOME/.claude/settings.json says so. Add this yourself — the one thing

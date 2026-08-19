@@ -1185,6 +1185,13 @@ impl Store {
     /// `progress` is called after each batch with (done, total), because the
     /// first run is slow enough that a silent wait reads as a hang.
     ///
+    /// `limit` caps how many revisions one call will take on. `None` is the
+    /// whole backlog and is what a person at a terminal wants. The daemon
+    /// passes a small number and calls this repeatedly, because it holds the
+    /// store behind a mutex for the length of the call — 62 documents took 26
+    /// seconds on the machine this was written on, and a request arriving in
+    /// the middle of that would wait for all of it.
+    ///
     /// A batch the model refuses is logged and skipped rather than aborting the
     /// pass: one unembeddable document should not stop the other two hundred.
     ///
@@ -1202,11 +1209,12 @@ impl Store {
     pub fn reembed_missing(
         &mut self,
         embedder: &dyn crate::Embedder,
+        limit: Option<usize>,
         mut progress: impl FnMut(usize, usize),
     ) -> Result<ReembedReport> {
         let mut report = ReembedReport::default();
 
-        let pending: Vec<(String, String, String)> = {
+        let mut pending: Vec<(String, String, String)> = {
             let mut stmt = self
                 .conn
                 .prepare(
@@ -1229,6 +1237,9 @@ impl Store {
                 .map_err(Error::storage("read a revision with no passages"))?
         };
 
+        if let Some(limit) = limit {
+            pending.truncate(limit);
+        }
         report.missing = pending.len();
         if pending.is_empty() {
             return Ok(report);
@@ -1254,7 +1265,15 @@ impl Store {
                 // then which vector a document has depends on when it was last
                 // touched rather than on what it says.
                 match chunks_for(&tx, embedder, doc_id, title, body) {
-                    Ok(_) => done += 1,
+                    // Passages written, so the revision is embedded. Zero of
+                    // them is not: `write_chunks_in` turns a refusal from the
+                    // model into `Ok(0)` — deliberately, so one bad document
+                    // cannot fail a write — and counting that as a success made
+                    // this report say "62 document(s) embedded" about a pass
+                    // that had embedded none of them. It also made a caller
+                    // looping until no progress loop for ever.
+                    Ok(n) if n > 0 => done += 1,
+                    Ok(_) => failed += 1,
                     Err(e) => {
                         tracing::warn!(
                             doc_id = %doc_id,
