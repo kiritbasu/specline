@@ -1,15 +1,37 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T20:31:30Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T21:09:49Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (306)
+## Closed work (310)
 
 ### 2026-08-19
+
+- **KEEL-350** Embeddings on by default, and the backlog embedded without anyone asking — `done`
+
+  A daemon started with no flags at all now loads the model and backfills what has no vector. Proved on a scratch store: the fixture loaded 52 documents with no vectors, the daemon started, said "embedding them in the background once the model has loaded", and thirty seconds later `specline doctor` said all 52 had one — with a search over that store returning hits sourced from `both`. `--no-embeddings` turns it off and is reported by `/api/health` as `loaded: false`; the old `--embeddings` still starts, ignored. The installer's default matches, and so do the launchd and systemd units it writes.
+
+  <sub>commit:21bb5d4 · test:cargo test -p specline-daemon --test backfill · doc:dec_01M0DWM0GZ0AC0R0JWPKQ1DQWF</sub>
+
+- **KEEL-348** Stop building an AV1 encoder in order to embed text — `done`
+
+  `fastembed` is declared with default features off and the two it actually uses, so `image`, `ravif` and `rav1e` leave the graph: 310 crates to 255. The embedder still loads and embeds — a daemon built from this backfilled 52 documents from a cold start.
+
+  <sub>commit:5fb2988 · test:cargo tree --workspace --edges normal · test:cargo test -p specline-daemon --test backfill</sub>
+
+- **KEEL-251** specline_search promises hybrid retrieval and runs keyword-only, without saying so — `done`
+
+  A search now returns `searched` naming the halves that ran and `not_searched` saying why the others did not, and the summary says it in prose — with a different sentence when there were no hits, because that is the one that gets read as a fact about the store. Proved against a running daemon: with no model, an unmatched query comes back "not evidence that nothing is stored about it"; with one, `searched` is `["keyword","semantic"]` and hits arrive sourced from `both`. `specline doctor` gained a `semantic_search` check for the case the embeddings check cannot see — a fully embedded store served by a process with no model.
+
+  <sub>commit:b15861e · test:cargo test --workspace · test:cargo test --workspace --exclude specline-embed --no-default-features</sub>
+
+- **KEEL-211** Put the embedding model somewhere sensible and ask before downloading it — `wont_do`
+
+  Both halves are settled, neither by doing what this row asked. The model cache has lived under the Specline home since the daemon started deriving it from `home` — `~/.specline/models`, not fastembed's process-relative default — so the first half was already true. The second half, asking before the download, is reversed by B-95: KB asked for embeddings to work with no manual setup, and the six months this was open are the argument, because the download nobody was asked about is also the download nobody ever got.
 
 - **KEEL-347** Run the daily-driver daemon with embeddings, and backfill the documents that have no vector — `done`
 
@@ -1427,6 +1449,35 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-08-19 | claude | status in_progress → done |
+| 2026-08-19 | claude | evidence [] → (108 characters) |
+| 2026-08-19 | claude | close_reason none → done |
+| 2026-08-19 | claude | close_message none → (599 characters) |
+| 2026-08-19 | claude | status in_progress → done |
+| 2026-08-19 | claude | evidence [] → (116 characters) |
+| 2026-08-19 | claude | close_reason none → done |
+| 2026-08-19 | claude | close_message none → (253 characters) |
+| 2026-08-19 | claude | status in_progress → done |
+| 2026-08-19 | claude | evidence [] → (125 characters) |
+| 2026-08-19 | claude | close_reason none → done |
+| 2026-08-19 | claude | close_message none → (628 characters) |
+| 2026-08-19 | claude | status todo → in_progress |
+| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
+| 2026-08-19 | claude | claimed_at none → 2026-08-19T21:00:41.082790Z |
+| 2026-08-19 | claude | status todo → in_progress |
+| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
+| 2026-08-19 | claude | claimed_at none → 2026-08-19T21:00:39.131485Z |
+| 2026-08-19 | claude | created task “Embeddings on by default, and the backlog embedded without anyone asking” |
+| 2026-08-19 | claude | status todo → wont_do |
+| 2026-08-19 | claude | close_reason none → wont_do |
+| 2026-08-19 | claude | close_message none → (517 characters) |
+| 2026-08-19 | claude | created task “Put semantic search in a released binary, by loading the ONNX runtime instead of linking it” |
+| 2026-08-19 | claude | revised decision “Semantic search is on unless you turn it off, and the model arrives without being asked for” to v1 |
+| 2026-08-19 | claude | created decision “Semantic search is on unless you turn it off, and the model arrives without being asked for” |
+| 2026-08-19 | claude | created task “Stop building an AV1 encoder in order to embed text” |
+| 2026-08-19 | claude | status todo → in_progress |
+| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
+| 2026-08-19 | claude | claimed_at none → 2026-08-19T20:33:42.838781Z |
+| 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → (97 characters) |
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (480 characters) |
@@ -1597,35 +1648,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → (137 characters) |
 | 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (311 characters) |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (126 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (316 characters) |
-| 2026-08-19 | claude | created milestone “0.3.0 — what to pick up next, with a page of its own” |
-| 2026-08-19 | claude | created milestone “0.2.1 — store relocation fixes” |
-| 2026-08-19 | claude | created milestone “0.2.0 — Keel is now Specline” |
-| 2026-08-19 | claude | created milestone “0.1.5 — three platforms, and no embeddings in a released binary” |
-| 2026-08-19 | claude | created milestone “0.1.5-rc.1 — a prerelease to exercise the release path” |
-| 2026-08-19 | claude | created milestone “0.1.4 — the update restarts the daemon” |
-| 2026-08-19 | claude | created milestone “0.1.3 — the installer verifies what it downloads” |
-| 2026-08-19 | claude | created milestone “0.1.2 — the updater, and the manifest it reads” |
-| 2026-08-19 | claude | created milestone “0.1.1 — private release assets” |
-| 2026-08-19 | claude | created milestone “0.1.0 — the first installable build” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T10:18:04.483729Z |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T10:07:19.587426Z |
-| 2026-08-19 | claude | created task “Backfill the ten shipped versions as release rows, so the roadmap has a real time axis” |
-| 2026-08-19 | claude | created task “The roadmap shows how far a phase has got, instead of a target date nobody set” |
-| 2026-08-19 | claude | revised question “The roadmap's target column is empty on every open phase. Date, release, or drop it?” to v1 |
-| 2026-08-19 | claude | created question “The roadmap's target column is empty on every open phase. Date, release, or drop it?” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T09:54:42.498502Z |
-| 2026-08-19 | claude | status in_progress → done |
 
-*Showing the 200 most recent of 2593 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2622 changes. Use `specline_activity` for the rest.*
 
