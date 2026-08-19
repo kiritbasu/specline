@@ -225,11 +225,17 @@ impl AppState {
             // reports a version, and quietly answers every search with keyword
             // hits — which is indistinguishable from one where the model simply
             // has not finished loading.
+            // Every released binary takes this branch, because no published
+            // archive is built with the feature — so the wording cannot blame
+            // a flag the person did not type. Embeddings are on by default
+            // now; this build simply has none to turn on.
             #[cfg(not(feature = "embeddings"))]
             tracing::warn!(
-                "--embeddings was asked for and this build has no embedding model compiled in, \
-                 so search stays keyword-only. `specline doctor` reports this, and the arm64 macOS \
-                 release is the build that carries one"
+                "this build has no embedding model compiled in, so search is keyword-only. \
+                 Nothing is wrong and nothing needs turning on — every artifact is still \
+                 searchable by keyword, a search says which halves of it ran, and \
+                 `specline doctor` reports the same. Building from source is the way to get \
+                 the other half today"
             );
         }
 

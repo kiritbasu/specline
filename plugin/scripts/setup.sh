@@ -62,6 +62,9 @@ SPECLINE_HOME_DIR="${SPECLINE_HOME:-$HOME/.specline}"
 DAEMON_URL="http://127.0.0.1:$PORT"
 
 DRY_RUN=false
+# Whether the binary carries an embedding model at all, learned from
+# /api/health once the daemon answers. Assumed absent until it says otherwise.
+EMBEDDINGS_BUILT_IN=false
 # On by default since B-95. It was opt-in, and nobody opted in — including the
 # person who wrote it — so every install had keyword search wearing the name of
 # a hybrid one. `--no-embeddings` is the way out, and the first start downloads
@@ -414,12 +417,24 @@ else
 
     answered=false
     for _ in $(seq 1 20); do
-        if curl -sf --max-time 2 "$DAEMON_URL/api/health" >/dev/null 2>&1; then
+        if health="$(curl -sf --max-time 2 "$DAEMON_URL/api/health" 2>/dev/null)"; then
             answered=true
             break
         fi
         sleep 1
     done
+
+    # Ask the daemon what it can do rather than reporting what we asked for.
+    # Every *released* binary is built without the embedding model — no
+    # prebuilt ONNX Runtime exists for Intel macOS, so the release ships the
+    # feature off on all three platforms (KEEL-252, KEEL-349). Printing
+    # "Embeddings on" at somebody who has just downloaded one would be this
+    # script promising a capability the binary does not have, which is worse
+    # than the capability being absent.
+    case "$health" in
+        *'"built_in":true'*|*'"built_in": true'*) EMBEDDINGS_BUILT_IN=true ;;
+        *) EMBEDDINGS_BUILT_IN=false ;;
+    esac
 
     if [ "$answered" = true ]; then
         ok "answering on $DAEMON_URL"
@@ -435,10 +450,15 @@ step "Done"
 printf '  Store      %s\n' "$SPECLINE_HOME_DIR"
 printf '  Daemon     %s\n' "$DAEMON_URL"
 printf '  Interface  specline ui\n'
-printf '  Embeddings %s\n' \
-    "$([ "$EMBEDDINGS" = true ] \
-        && echo "on — the first start downloads a 127 MB model" \
-        || echo "off — keyword search works either way")"
+if [ "$EMBEDDINGS_BUILT_IN" = false ]; then
+    printf '  Embeddings %s\n' \
+        "not in this build — search matches words, not meaning"
+else
+    printf '  Embeddings %s\n' \
+        "$([ "$EMBEDDINGS" = true ] \
+            && echo "on — the first start downloads a 127 MB model" \
+            || echo "off — keyword search works either way")"
+fi
 printf '  Updates    %s\n\n' \
     "$([ "$UPDATE_CHECK" = true ] \
         && echo "checks every half hour for a new release — see below" \
@@ -461,6 +481,17 @@ printf '  \033[1mRestart Claude Code now.\033[0m MCP servers are connected at st
 printf '  and nothing was listening when this session began — so the specline_* tools\n'
 printf '  will not appear until you do.\n\n'
 
-[ "$EMBEDDINGS" = false ] && printf '  Search will be keyword-only. For meaning as well as words, re-run\n  without --no-embeddings (the first start downloads a 127 MB model).\n\n'
+# Said plainly, and only to the person it is true of. A downloaded binary
+# cannot do this at all, and finding that out from a thin search result later
+# is the version that costs trust.
+if [ "$EMBEDDINGS_BUILT_IN" = false ]; then
+    printf '  \033[1mThis build searches by keyword only.\033[0m Released binaries carry no\n'
+    printf '  embedding model: the ONNX runtime it needs has no build for Intel macOS,\n'
+    printf '  so the release ships without it on every platform. Every artifact is still\n'
+    printf '  searchable, and a search tells you which halves of it ran. Building from\n'
+    printf '  source is the way to get the other half today.\n\n'
+elif [ "$EMBEDDINGS" = false ]; then
+    printf '  Search will be keyword-only. For meaning as well as words, re-run\n  without --no-embeddings (the first start downloads a 127 MB model).\n\n'
+fi
 
 exit 0
