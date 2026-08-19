@@ -182,6 +182,27 @@ pub fn serving(base: &str, home: &Path) -> Serving {
     }
 }
 
+/// Whether the daemon at `base` has an embedding model loaded.
+///
+/// `None` means the question could not be answered — nothing listening, an
+/// older daemon whose health payload predates the field, a store busy enough
+/// that it reported `null` rather than guessing. That is deliberately not the
+/// same answer as `Some(false)`: "it has no model" is a finding to report and
+/// "I could not tell" is not.
+///
+/// Read from `/api/health` rather than from the store, because this is a fact
+/// about the running process. The store cannot answer it — a model is loaded
+/// into a daemon, not into a file.
+pub fn embedder_loaded(base: &str) -> Option<bool> {
+    let url = format!("{}/api/health", base.trim_end_matches('/'));
+    let body: serde_json::Value = ureq::get(&url)
+        .timeout(PROBE_TIMEOUT)
+        .call()
+        .ok()
+        .and_then(|r| r.into_json().ok())?;
+    body.get("embeddings")?.get("loaded")?.as_bool()
+}
+
 /// Make a path comparable: absolute, with symlinks resolved as far as the
 /// filesystem can actually resolve them.
 ///

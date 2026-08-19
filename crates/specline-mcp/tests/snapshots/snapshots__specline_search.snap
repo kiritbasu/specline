@@ -5,7 +5,7 @@ expression: result
 {
   "content": [
     {
-      "text": "1 match(es) for “idempotency”:\n  [task] Dedupe usage events by idempotency key — [id]\n      Dedupe usage events by idempotency key",
+      "text": "1 match(es) for “idempotency”:\n  [task] Dedupe usage events by idempotency key — [id]\n      Dedupe usage events by idempotency key\n  … and this is a partial search. The semantic half did not run: no embedding model is loaded, so nothing could be matched by meaning — the daemon was started without embeddings, or this build has none. Expect gaps: anything worded differently from your query would not have been found.",
       "type": "text"
     }
   ],
@@ -21,6 +21,12 @@ expression: result
         "source": "keyword",
         "title": "Dedupe usage events by idempotency key"
       }
+    ],
+    "not_searched": {
+      "semantic": "no embedding model is loaded, so nothing could be matched by meaning — the daemon was started without embeddings, or this build has none"
+    },
+    "searched": [
+      "keyword"
     ],
     "total": 1,
     "truncated": false

@@ -131,6 +131,114 @@ async fn a_broken_model_cache_leaves_keyword_search_working() {
     );
 }
 
+/// A degraded search has to say it was degraded, in the response itself.
+///
+/// The half that did not run leaves no trace in `hits` — the results of a
+/// keyword-only search and a hybrid one are the same shape, the same fields and
+/// often the same rows. So the only place the difference can live is a field
+/// that names it, and the case that matters most is the one with no hits at
+/// all: "no matches" from half a search reads as a fact about the store, and a
+/// model that believes it goes and writes down again what was already there.
+#[tokio::test]
+async fn a_search_with_no_model_says_which_halves_ran() {
+    let home = poisoned_home();
+    let base = tokio::time::timeout(Duration::from_secs(10), daemon(home.path()))
+        .await
+        .expect("the daemon must bind its socket without waiting for a model");
+    let client = reqwest::Client::new();
+
+    client
+        .post(format!("{base}/mcp"))
+        .json(&tool_call(
+            "specline_create",
+            json!({"type": "project", "title": "Metering", "slug": "metering"}),
+        ))
+        .send()
+        .await
+        .unwrap();
+    client
+        .post(format!("{base}/mcp"))
+        .json(&tool_call(
+            "specline_create",
+            json!({
+                "type": "decision",
+                "project": "metering",
+                "title": "Aggregate hourly, not per-minute",
+                "body": "Per-minute buckets cost more than they are worth.\n"
+            }),
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    let found: Value = client
+        .post(format!("{base}/mcp"))
+        .json(&tool_call("specline_search", json!({"query": "hourly"})))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        found.pointer("/result/structuredContent/searched"),
+        Some(&json!(["keyword"])),
+        "only the keyword half ran and the response has to name it: {found}"
+    );
+    let why = found
+        .pointer("/result/structuredContent/not_searched/semantic")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("no reason for the silent half in {found}"));
+    assert!(
+        why.contains("embedding model"),
+        "the reason must name what is missing: {why}"
+    );
+
+    // And in the prose, because a model reads that first and some clients show
+    // nothing else.
+    let text = found
+        .pointer("/result/content/0/text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        text.contains("partial search"),
+        "a degraded search must say so in its summary: {text}"
+    );
+
+    // The dangerous case. Nothing matched, and the answer must not be read as
+    // "the store has nothing about this".
+    let empty: Value = client
+        .post(format!("{base}/mcp"))
+        .json(&tool_call(
+            "specline_search",
+            json!({"query": "kubernetes ingress"}),
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        empty
+            .pointer("/result/structuredContent/hits")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "the setup is wrong if this matched something: {empty}"
+    );
+    let text = empty
+        .pointer("/result/content/0/text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        text.contains("not \u{200b}evidence") || text.contains("not evidence"),
+        "an empty half-search must refuse to be read as an empty store: {text}"
+    );
+}
+
 /// A model that never arrives must not make writes fail either.
 ///
 /// Embedding happens on the way into a revision. If a missing model turned that

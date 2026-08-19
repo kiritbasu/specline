@@ -605,14 +605,52 @@ fn specline_search(
         limit: opt_i64(args, "limit").unwrap_or(20).clamp(1, 100) as usize,
     };
 
-    let page = store
+    let results = store
         .search_prepared(&query, store.embedder(), query_vector.as_deref())
         .map_err(|e| to_rpc_error(store, e))?;
+    let (page, report) = (results.page, results.report);
+
+    // Which halves were silent, and why. The tool's description promises
+    // hybrid retrieval; when only one half ran, the response has to say so or
+    // the promise is what the reader believes (KEEL-251).
+    let mut silent: Vec<(&'static str, &'static str)> = Vec::new();
+    if let Some(why) = report.keyword.why() {
+        silent.push(("keyword", why));
+    }
+    if let Some(why) = report.semantic.why() {
+        silent.push(("semantic", why));
+    }
+    let caveat = silent
+        .iter()
+        .map(|(half, why)| format!("The {half} half did not run: {why}."))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // What the reader has actually lost, which is not the same for the two
+    // halves: without the semantic one, wording that differs from the query
+    // goes missing; without the keyword one, the exact words do.
+    let consequence = match (report.keyword.ran(), report.semantic.ran()) {
+        (true, false) => "anything worded differently from your query would not have been found",
+        (false, true) => "the words you typed were never matched literally",
+        _ => "neither index was asked",
+    };
+
     let summary = if page.items.is_empty() {
-        format!(
-            "No matches for “{}”. Try fewer words, or drop the type filter.",
-            query.text
-        )
+        if silent.is_empty() {
+            format!(
+                "No matches for “{}”. Try fewer words, or drop the type filter.",
+                query.text
+            )
+        } else {
+            // The dangerous case, and the reason for all of the above. "No
+            // matches" from half a search reads as a fact about the store, and
+            // a model that believes it goes and writes down again whatever was
+            // already there.
+            format!(
+                "No matches for “{}”, but only part of the search ran. {caveat} So this is not \
+                 evidence that nothing is stored about it — {consequence}.",
+                query.text
+            )
+        }
     } else {
         let mut lines = vec![format!(
             "{} match(es) for “{}”:",
@@ -631,6 +669,11 @@ fn specline_search(
                 page.total - page.items.len()
             ));
         }
+        if !silent.is_empty() {
+            lines.push(format!(
+                "  … and this is a partial search. {caveat} Expect gaps: {consequence}."
+            ));
+        }
         lines.join("\n")
     };
 
@@ -640,6 +683,13 @@ fn specline_search(
             "hits": page.items,
             "total": page.total,
             "truncated": page.truncated,
+            // Named halves rather than a boolean, because there are two of
+            // them and either can be the one that is missing.
+            "searched": report.ran(),
+            "not_searched": silent
+                .iter()
+                .map(|(half, why)| ((*half).to_owned(), Value::String((*why).to_owned())))
+                .collect::<serde_json::Map<_, _>>(),
         }),
     ))
 }

@@ -1355,6 +1355,115 @@ pub enum SearchSource {
     Both,
 }
 
+/// Whether one half of hybrid search ran, and if not, why not.
+///
+/// Search degrades rather than failing: a daemon with no model, a build with no
+/// vector extension, a type filter naming only types that have no prose — each
+/// leaves one half silent while the other answers normally. That is the right
+/// behaviour and it is also the dangerous one, because the results look the
+/// same either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HalfStatus {
+    /// It ran against its index. It may still have matched nothing.
+    Ran,
+    /// No embedding model was available, so there was no query vector to
+    /// compare with. The usual cause is a daemon started without embeddings.
+    NoModel,
+    /// `sqlite-vec` did not register, so `vec_distance_cosine` does not exist.
+    /// A property of the build, not of the store.
+    NoVectorExtension,
+    /// The `types` filter left this half nothing it could look at — asking the
+    /// semantic half for tasks, say, when only five types carry prose.
+    NoTypesInScope,
+    /// The query text held no words to match on. Keyword only: punctuation is
+    /// a search with no terms rather than a search that failed.
+    NoTerms,
+    /// It errored and the other half answered alone. The reason is in the log,
+    /// because an error here is about the store rather than about the query.
+    Failed,
+}
+
+impl HalfStatus {
+    /// Whether this half contributed to the results.
+    pub fn ran(self) -> bool {
+        matches!(self, HalfStatus::Ran)
+    }
+
+    /// Why it did not run, in a sentence the caller can act on.
+    ///
+    /// `None` when it ran. Returned as prose rather than as a code because the
+    /// caller who most needs this is a model reading a tool response, and
+    /// `no_model` alone does not tell it what to do about it.
+    pub fn why(self) -> Option<&'static str> {
+        match self {
+            HalfStatus::Ran => None,
+            HalfStatus::NoModel => Some(
+                "no embedding model is loaded, so nothing could be matched by meaning — the \
+                 daemon was started without embeddings, or this build has none",
+            ),
+            HalfStatus::NoVectorExtension => {
+                Some("the vector extension did not load, so this build cannot match by meaning")
+            }
+            HalfStatus::NoTypesInScope => {
+                Some("the type filter left this half nothing it could search")
+            }
+            HalfStatus::NoTerms => Some("the query text held no words to match on"),
+            HalfStatus::Failed => {
+                Some("it failed and the other half answered alone; the daemon log has the reason")
+            }
+        }
+    }
+}
+
+/// Which halves of hybrid search answered this query.
+///
+/// This exists because an empty result set is a claim about the store, and it
+/// is only true if both halves were asked. A model told "no matches" by a
+/// keyword-only search concludes nothing has been written about the subject and
+/// goes on to re-derive it — which is the failure this codebase is organised
+/// around, arriving through the one path that reports everything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchReport {
+    /// BM25 over every searchable artifact.
+    pub keyword: HalfStatus,
+    /// Cosine neighbours over the passages of the five prose types.
+    pub semantic: HalfStatus,
+}
+
+impl SearchReport {
+    /// Both halves ran. The only case in which "nothing matched" describes the
+    /// store rather than the search.
+    pub fn complete(&self) -> bool {
+        self.keyword.ran() && self.semantic.ran()
+    }
+
+    /// The halves that ran, named. Empty when neither did.
+    pub fn ran(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.keyword.ran() {
+            out.push("keyword");
+        }
+        if self.semantic.ran() {
+            out.push("semantic");
+        }
+        out
+    }
+}
+
+/// A page of search hits, and which halves produced it.
+///
+/// One type rather than a tuple so that the report cannot be dropped by a
+/// caller destructuring only what it wanted — which is how it went unreported
+/// for as long as it did.
+#[derive(Debug, Clone)]
+pub struct SearchResults {
+    /// The fused hits, with the usual truncation report.
+    pub page: Page<SearchHit>,
+    /// Which halves ran.
+    pub report: SearchReport,
+}
+
 /// A stored binary blob.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Blob {

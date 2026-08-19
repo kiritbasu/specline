@@ -72,9 +72,27 @@
 //! Each half retrieves [`SearchQuery::inner_limit`] rows, not `limit`.
 //! Retrieving exactly `k` and *then* filtering by project is how a search
 //! returns three results when forty exist.
+//!
+//! # Saying which halves ran
+//!
+//! Everything above degrades quietly by design — a missing model, an absent
+//! extension and a filter with no prose in scope all leave one half returning
+//! an empty list while the other answers. That is right, and on its own it is
+//! also the failure this codebase exists to refuse: the caller cannot tell
+//! "there is nothing about this in the store" from "half the search did not
+//! run", and the first is a much stronger claim than anyone made.
+//!
+//! So every half returns a [`Half`] — its hits *and* whether it looked — and
+//! [`SearchResults`] carries the pair out to the caller as a
+//! [`SearchReport`]. Nothing here decides what to do about it; `specline-mcp`
+//! puts it in the response and `specline doctor` reports it. What this file
+//! guarantees is that the information exists at all.
 
 use super::Store;
-use crate::store::{Blob, DocumentStore, Page, SearchHit, SearchQuery, SearchSource};
+use crate::store::{
+    Blob, DocumentStore, HalfStatus, Page, SearchHit, SearchQuery, SearchReport, SearchResults,
+    SearchSource,
+};
 use crate::{BlobId, Document, DocumentDiff, Embedder, EntityId, EntityType, Error, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::params_from_iter;
@@ -100,6 +118,35 @@ const EXCERPT_WIDTH: usize = 240;
 const LABEL_WEIGHT: &str = "2.0";
 /// See [`LABEL_WEIGHT`].
 const BODY_WEIGHT: &str = "1.0";
+
+/// One half's contribution: what it found, and whether it looked at all.
+///
+/// The status travels with the hits rather than being worked out afterwards
+/// because only the half itself knows the difference between "looked and found
+/// nothing" and "had nothing to look at" — and from the outside those two
+/// produce the same empty vector.
+struct Half {
+    hits: Vec<SearchHit>,
+    status: HalfStatus,
+}
+
+impl Half {
+    /// It ran. The hits may still be empty.
+    fn ran(hits: Vec<SearchHit>) -> Self {
+        Half {
+            hits,
+            status: HalfStatus::Ran,
+        }
+    }
+
+    /// It did not run, for the given reason.
+    fn skipped(status: HalfStatus) -> Self {
+        Half {
+            hits: Vec::new(),
+            status,
+        }
+    }
+}
 
 /// `?, ?, ?` for an `IN` list of `n` bound values.
 fn placeholders(n: usize) -> String {
@@ -252,9 +299,13 @@ impl Store {
     /// Hybrid search across both indexes, fused by reciprocal rank.
     ///
     /// Uses whatever embedder was attached with [`Store::with_embedder`]. If
-    /// none was, this is keyword search and nothing says so in the output —
-    /// which is why attaching one is not really optional. See
+    /// none was, this is keyword search wearing the name of a hybrid one. See
     /// [`Store::search_with`] for the caller-supplied variant.
+    ///
+    /// **This drops the [`SearchReport`].** Anything that shows results to a
+    /// person or a model wants [`Store::search_prepared`] instead, which says
+    /// which halves ran — without it there is no way to tell an empty store
+    /// from an empty search.
     pub fn search(&self, query: &SearchQuery) -> Result<Page<SearchHit>> {
         // The store's own embedder, when one was attached. This was briefly a
         // hard `None`, which meant the semantic half never ran no matter what
@@ -274,7 +325,7 @@ impl Store {
         query: &SearchQuery,
         embedder: Option<&dyn Embedder>,
     ) -> Result<Page<SearchHit>> {
-        self.search_prepared(query, embedder, None)
+        Ok(self.search_prepared(query, embedder, None)?.page)
     }
 
     /// Search with the query text already turned into a vector.
@@ -295,7 +346,7 @@ impl Store {
         query: &SearchQuery,
         embedder: Option<&dyn Embedder>,
         precomputed: Option<&[f32]>,
-    ) -> Result<Page<SearchHit>> {
+    ) -> Result<SearchResults> {
         if query.text.trim().is_empty() {
             // Refused rather than answered with nothing. An empty result
             // would read to a model as "there is
@@ -316,18 +367,27 @@ impl Store {
         // take out the other. A search that returns part of the story is far
         // more useful than one that returns an error, so long as the reason is
         // in the log rather than swallowed.
-        let mut lists = Vec::new();
-        lists.push(self.search_keyword(query).unwrap_or_else(|e| {
+        //
+        // Both halves report what they did as well as what they found, and the
+        // report travels out with the results. A half that failed here is
+        // indistinguishable at the call site from one that matched nothing,
+        // which is the whole of KEEL-251.
+        let keyword = self.search_keyword(query).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "keyword search failed; returning semantic hits only");
-            Vec::new()
-        }));
-        lists.push(
-            self.search_semantic(query, embedder, precomputed)
-                .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "semantic search failed; returning keyword hits only");
-                    Vec::new()
-                }),
-        );
+            Half::skipped(HalfStatus::Failed)
+        });
+        let semantic = self
+            .search_semantic(query, embedder, precomputed)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "semantic search failed; returning keyword hits only");
+                Half::skipped(HalfStatus::Failed)
+            });
+
+        let report = SearchReport {
+            keyword: keyword.status,
+            semantic: semantic.status,
+        };
+        let lists = vec![keyword.hits, semantic.hits];
 
         // `total` counts distinct artifacts, not raw hits: a row both halves
         // found is one result, and counting it twice would make `truncated`
@@ -339,10 +399,13 @@ impl Store {
             .collect();
         let total = distinct.len();
         let fused = reciprocal_rank_fusion(lists, query.limit);
-        Ok(Page {
-            truncated: total > fused.len(),
-            total,
-            items: fused,
+        Ok(SearchResults {
+            page: Page {
+                truncated: total > fused.len(),
+                total,
+                items: fused,
+            },
+            report,
         })
     }
 
@@ -352,9 +415,9 @@ impl Store {
     /// here. Archived rows are already absent from `fts_source`, which is why
     /// no query in this file carries a `WHERE archived_at IS NULL` that someone
     /// could later forget.
-    fn search_keyword(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
+    fn search_keyword(&self, query: &SearchQuery) -> Result<Half> {
         let Some(expression) = fts_match(&query.text) else {
-            return Ok(Vec::new());
+            return Ok(Half::skipped(HalfStatus::NoTerms));
         };
 
         let mut params: Vec<Value> = vec![Value::Text(expression)];
@@ -374,7 +437,7 @@ impl Store {
             // Asking only for metrics is a well-formed question with no
             // answers, not an unfiltered search.
             if types.is_empty() {
-                return Ok(Vec::new());
+                return Ok(Half::skipped(HalfStatus::NoTypesInScope));
             }
             filters.push_str(&format!(
                 " AND s.entity_type IN ({})",
@@ -441,27 +504,29 @@ impl Store {
                 source: SearchSource::Keyword,
             });
         }
-        self.within_dates(out, query)
+        self.within_dates(out, query).map(Half::ran)
     }
 
-    /// Cosine nearest neighbours over the embeddings on `documents`.
+    /// Cosine nearest neighbours over the passages of the prose types.
     ///
-    /// Returns nothing at all when there is no embedder, which is the honest
+    /// Does not run at all when there is no embedder, which is the honest
     /// answer rather than a failure: without one there is no query vector, and
-    /// the keyword half still covers the whole corpus.
+    /// the keyword half still covers the whole corpus. It says so in the
+    /// [`Half`] it returns, because the caller cannot tell that from a search
+    /// that ran and matched nothing.
     fn search_semantic(
         &self,
         query: &SearchQuery,
         embedder: Option<&dyn Embedder>,
         precomputed: Option<&[f32]>,
-    ) -> Result<Vec<SearchHit>> {
+    ) -> Result<Half> {
         // If `sqlite-vec` never registered, `vec_distance_cosine` does not
         // exist and this query would fail outright — turning a search into an
         // error for a caller who only wanted results. Degrade to keyword-only
         // instead. Whoever opened the store is expected to have said so loudly
         // at startup; `Store::vector_search_available` is what they ask.
         if !self.vector_search_available() {
-            return Ok(Vec::new());
+            return Ok(Half::skipped(HalfStatus::NoVectorExtension));
         }
         // The embedder is required even when the vector was computed
         // elsewhere, because it is what names the model — and without the name
@@ -469,7 +534,7 @@ impl Store {
         // against. Returning nothing is the honest answer; guessing is how the
         // failure below happens silently.
         let Some(embedder) = embedder else {
-            return Ok(Vec::new());
+            return Ok(Half::skipped(HalfStatus::NoModel));
         };
         let owned;
         let vector: &[f32] = match precomputed {
@@ -508,7 +573,7 @@ impl Store {
             // Only five types have prose, so asking for tasks alone means the
             // semantic half has nothing to contribute — not that it failed.
             if types.is_empty() {
-                return Ok(Vec::new());
+                return Ok(Half::skipped(HalfStatus::NoTypesInScope));
             }
             filters.push_str(&format!(
                 " AND c.entity_type IN ({})",
@@ -625,7 +690,7 @@ impl Store {
                 source: SearchSource::Semantic,
             });
         }
-        self.within_dates(out, query)
+        self.within_dates(out, query).map(Half::ran)
     }
 
     /// Keep only the hits whose entity was created inside the query's window.
@@ -1228,9 +1293,9 @@ mod tests {
         let before = store
             .search_prepared(&SearchQuery::new("flightless"), Some(&TopicEmbedder), None)
             .unwrap();
-        assert_eq!(ids(&before), vec![spec.as_str()]);
+        assert_eq!(ids(&before.page), vec![spec.as_str()]);
         assert_eq!(
-            before.items[0].source,
+            before.page.items[0].source,
             SearchSource::Semantic,
             "the setup is wrong if BM25 could have found this"
         );
@@ -1255,6 +1320,7 @@ mod tests {
             store
                 .search_prepared(&SearchQuery::new("flightless"), Some(&TopicEmbedder), None)
                 .unwrap()
+                .page
                 .items
                 .is_empty(),
             "an archived spec must leave the semantic index too"
@@ -1430,7 +1496,7 @@ mod tests {
             .search_prepared(&SearchQuery::new("flightless"), Some(&TopicEmbedder), None)
             .unwrap();
         assert_eq!(
-            ids(&found),
+            ids(&found.page),
             vec![ours.as_str()],
             "a passage from another model was ranked against this one's query vector"
         );
@@ -1585,5 +1651,109 @@ mod tests {
         let task = add_task(&store, &project, "The board", "a widget for the board");
         let via_trait = DocumentStore::search(&store, &SearchQuery::new("widget")).unwrap();
         assert_eq!(ids(&via_trait), vec![task.as_str()]);
+    }
+
+    /// Both halves ran, so an empty answer would have been a fact about the
+    /// store. This is the case every other report has to be distinguishable
+    /// from, which is why it is asserted rather than assumed.
+    #[test]
+    fn a_search_with_a_model_reports_both_halves() {
+        let (mut store, project) = store_with_a_project();
+        add_spec(
+            &mut store,
+            &project,
+            "Penguins",
+            "the emperor penguin broods in the antarctic winter",
+            Some(std::sync::Arc::new(TopicEmbedder)),
+        );
+
+        let found = store
+            .search_prepared(&SearchQuery::new("flightless"), Some(&TopicEmbedder), None)
+            .unwrap();
+        assert!(found.report.complete());
+        assert_eq!(found.report.ran(), vec!["keyword", "semantic"]);
+        assert_eq!(found.report.keyword.why(), None);
+        assert_eq!(found.report.semantic.why(), None);
+    }
+
+    /// The failure case, and the one this whole report exists for: no model, so
+    /// the semantic half never touched the database, and the results say so.
+    ///
+    /// The hits are identical to a healthy search's — that is the point. There
+    /// is nothing in `items` for a caller to notice, which is how a store with
+    /// a fully populated vector index served by a daemon with no model went
+    /// months looking exactly like a store that had been asked and had little
+    /// to say.
+    #[test]
+    fn a_search_with_no_model_says_the_semantic_half_did_not_run() {
+        let (mut store, project) = store_with_a_project();
+        add_spec(
+            &mut store,
+            &project,
+            "Penguins",
+            "the emperor penguin broods in the antarctic winter",
+            Some(std::sync::Arc::new(TopicEmbedder)),
+        );
+
+        let found = store
+            .search_prepared(&SearchQuery::new("penguin"), None, None)
+            .unwrap();
+        assert!(
+            !found.page.items.is_empty(),
+            "the keyword half still answers, which is what makes this quiet"
+        );
+        assert!(!found.report.complete());
+        assert_eq!(found.report.ran(), vec!["keyword"]);
+        assert_eq!(found.report.semantic, HalfStatus::NoModel);
+        assert!(
+            found
+                .report
+                .semantic
+                .why()
+                .unwrap_or_default()
+                .contains("embedding model"),
+            "the reason has to name what is missing, not only that something is"
+        );
+    }
+
+    /// A filter naming only types that have no prose is a narrowing, not a
+    /// degradation — but it still silences a half, and a caller comparing two
+    /// searches deserves to know which of them asked both indexes.
+    #[test]
+    fn a_type_filter_with_no_prose_in_it_reports_the_semantic_half_out_of_scope() {
+        let (store, project) = store_with_a_project();
+        let task = add_task(&store, &project, "The board", "a widget for the board");
+
+        let found = store
+            .search_prepared(
+                &SearchQuery {
+                    entity_types: vec![EntityType::Task],
+                    ..SearchQuery::new("widget")
+                },
+                Some(&TopicEmbedder),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            ids(&found.page),
+            vec![task.as_str()],
+            "the keyword half still answers for a type it covers"
+        );
+        assert_eq!(found.report.semantic, HalfStatus::NoTypesInScope);
+        assert_eq!(found.report.keyword, HalfStatus::Ran);
+    }
+
+    /// And the mirror image: text with no words in it leaves the keyword half
+    /// with nothing to match, while the semantic half is perfectly able to
+    /// answer. Empty text is refused outright, so this is the narrowest input
+    /// that still reaches the search.
+    #[test]
+    fn text_with_no_words_reports_the_keyword_half_had_no_terms() {
+        let (store, _project) = store_with_a_project();
+        let found = store
+            .search_prepared(&SearchQuery::new("!!! ???"), Some(&TopicEmbedder), None)
+            .unwrap();
+        assert_eq!(found.report.keyword, HalfStatus::NoTerms);
+        assert_eq!(found.report.semantic, HalfStatus::Ran);
     }
 }

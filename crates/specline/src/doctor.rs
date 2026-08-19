@@ -172,7 +172,12 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
     // Not a problem either way: the CLI works without one. It is the first
     // thing to say because it changes what every other line means — a check
     // run against a store nothing is writing to is a different check.
-    checks.push(match crate::writes::probe(daemon) {
+    // Kept, not only pushed: the semantic-search check below needs to know
+    // whether there is a daemon at all, because "no model loaded" and "no
+    // daemon to load one into" are different findings and only the first is
+    // worth a remedy here.
+    let daemon_state = crate::writes::probe(daemon);
+    checks.push(match &daemon_state {
         crate::writes::Daemon::Listening => Check::ok(
             "daemon",
             format!("a daemon is listening at {daemon} and owns the write path"),
@@ -364,6 +369,42 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
             "run `specline reembed --missing`",
         )
     });
+
+    // --- Is the half that reads meaning actually running ------------------
+    //
+    // The check above is about the store: are there vectors. This one is about
+    // the process: is anything able to make a query vector to compare them
+    // with. They come apart completely — a fully embedded store served by a
+    // daemon with no model does keyword search and looks perfect here.
+    //
+    // Only asked when this binary could have a model at all; when it could
+    // not, the check above has already said so and a second line saying it
+    // again is noise.
+    if specline_daemon::EMBEDDINGS_BUILT_IN && daemon_state == crate::writes::Daemon::Listening {
+        checks.push(match crate::writes::embedder_loaded(daemon) {
+            Some(true) => Check::ok(
+                "semantic_search",
+                format!("the daemon at {daemon} has the embedding model loaded, so searches run both halves"),
+            ),
+            Some(false) => Check::degraded(
+                "semantic_search",
+                format!(
+                    "the daemon at {daemon} has no embedding model loaded, so every search is \
+                     keyword-only — a query that shares no words with what it is looking for \
+                     finds nothing, and says so as though the store were empty"
+                ),
+                "restart it as `specline-daemon --embeddings`",
+            ),
+            // The daemon answered the port but not this question: an older
+            // build whose health payload predates the field, or a store busy
+            // enough that it declined to guess.
+            None => Check::degraded(
+                "semantic_search",
+                format!("the daemon at {daemon} did not say whether it has a model loaded"),
+                "check its version — `/api/health` reports this from 0.4.1",
+            ),
+        });
+    }
 
     // --- Is the passage index still describing the store? -----------------
     //

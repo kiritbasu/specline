@@ -263,7 +263,12 @@ pub fn all() -> Vec<Tool> {
                  and projects by keyword. Metrics are deliberately excluded — they are numbers, \
                  and reaching them is a filter rather than a search.\n\n\
                  Prefer a natural question over keywords; the semantic half is what makes \
-                 'why is billing slow' find a decision titled 'Aggregate hourly, not per-minute'."
+                 'why is billing slow' find a decision titled 'Aggregate hourly, not per-minute'.\n\n\
+                 Semantic search needs a daemon started with embeddings, and not every build \
+                 carries one — so `searched` in the response names the halves that actually ran, \
+                 and `not_searched` says why the others did not. When only the keyword half ran, \
+                 no matches means no words matched; it is not evidence that the store holds \
+                 nothing on the subject."
                     .to_owned(),
             read_only: true,
             destructive: false,

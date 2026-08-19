@@ -90,8 +90,8 @@ pub use next::{Candidate, NextUp, Ready, ReadyFilter, ready};
 pub use note::{NewNote, Note};
 pub use store::{
     Blob, Created, DAEMON_ENDPOINT_FILE, DocumentStore, EntityQuery, EntityStore, GraphStore,
-    MIN_PLUGIN_VERSION, Neighbour, Page, SearchHit, SearchQuery, SearchSource, Store,
-    pending_migrations_at, shipped_schema_version, store_path,
+    HalfStatus, MIN_PLUGIN_VERSION, Neighbour, Page, SearchHit, SearchQuery, SearchReport,
+    SearchResults, SearchSource, Store, pending_migrations_at, shipped_schema_version, store_path,
 };
 pub use style::{Warning, check as check_style};
 pub use types::{
