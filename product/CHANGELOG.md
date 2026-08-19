@@ -1,15 +1,21 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T21:09:49Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T21:22:34Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (310)
+## Closed work (311)
 
 ### 2026-08-19
+
+- **KEEL-351** Setup told a downloaded binary it had embeddings on — `done`
+
+  Setup now reads `embeddings.built_in` from the health payload it was already waiting on, and a build with no model gets told so in one bold paragraph with the reason. The daemon's startup line no longer names a flag nobody typed. Both configurations lint clean and the daemon suite passes.
+
+  <sub>commit:502a445 · test:cargo test -p specline-daemon · test:cargo clippy --workspace --exclude specline-embed --all-targets --no-default-features -- -D warnings</sub>
 
 - **KEEL-350** Embeddings on by default, and the backlog embedded without anyone asking — `done`
 
@@ -1448,6 +1454,11 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-08-19 | claude | status todo → done |
+| 2026-08-19 | claude | evidence [] → (163 characters) |
+| 2026-08-19 | claude | close_reason none → done |
+| 2026-08-19 | claude | close_message none → (289 characters) |
+| 2026-08-19 | claude | created task “Setup told a downloaded binary it had embeddings on” |
 | 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → (108 characters) |
 | 2026-08-19 | claude | close_reason none → done |
@@ -1643,11 +1654,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status open → answered |
 | 2026-08-19 | claude | created task “SPEC promises "overdue milestones" in the digest and nothing computes it” |
 | 2026-08-19 | claude | “The roadmap shows derived progress, not a target date, and…” resolves “The roadmap's target column is empty on every open phase.…” |
-| 2026-08-19 | claude | revised decision “The roadmap shows derived progress, not a target date, and releases are rows” to v1 |
-| 2026-08-19 | claude | created decision “The roadmap shows derived progress, not a target date, and releases are rows” |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (137 characters) |
-| 2026-08-19 | claude | close_reason none → done |
 
-*Showing the 200 most recent of 2622 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2627 changes. Use `specline_activity` for the rest.*
 
