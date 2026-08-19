@@ -1,15 +1,21 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T20:23:12Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T20:31:30Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (305)
+## Closed work (306)
 
 ### 2026-08-19
+
+- **KEEL-347** Run the daily-driver daemon with embeddings, and backfill the documents that have no vector — `done`
+
+  Stopped the daemon, ran `specline reembed --missing` — 62 documents, 26 seconds — and restarted it with `--embeddings`. Health now reports `loaded: true`, doctor says all 200 current documents have a vector, and a search comes back with every hit sourced from `both` halves rather than keyword alone. The one part of the summary not met is the reboot: KB chose to leave the daemon hand-started rather than install a launch agent, so the flag has to be typed again after a restart.
+
+  <sub>test:specline reembed --missing · test:specline doctor · url:http://127.0.0.1:7654/api/health</sub>
 
 - **KEEL-346** Write the release-row-then-tag loop into the standing contract — `done`
 
@@ -1421,6 +1427,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-08-19 | claude | status in_progress → done |
+| 2026-08-19 | claude | evidence [] → (97 characters) |
+| 2026-08-19 | claude | close_reason none → done |
+| 2026-08-19 | claude | close_message none → (480 characters) |
+| 2026-08-19 | claude | status todo → in_progress |
+| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
+| 2026-08-19 | claude | claimed_at none → 2026-08-19T20:28:21.763078Z |
+| 2026-08-19 | claude | created task “Run the daily-driver daemon with embeddings, and backfill the documents that have no vector” |
+| 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → ["commit:9a0b607","doc:spc_01KZKSME2TCPVARX9M04836XD6"] |
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (258 characters) |
@@ -1612,14 +1626,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T09:54:42.498502Z |
 | 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → ["commit:19f0580","test:cargo test -p specline-core --test inbox"] |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (256 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T09:47:23.421076Z |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (169 characters) |
 
-*Showing the 200 most recent of 2585 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2593 changes. Use `specline_activity` for the rest.*
 
