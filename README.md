@@ -357,7 +357,7 @@ They are joined by a typed graph. A task implements a spec, a decision
 supersedes an older one, a task blocks another. The graph is what lets you ask
 what is blocked instead of guessing.
 
-Claude sees thirteen tools: `specline_context`, `specline_search`,
+An agent sees thirteen tools: `specline_context`, `specline_search`,
 `specline_get`, `specline_projects`, `specline_activity`, `specline_create`,
 `specline_update`, `specline_write_doc`, `specline_note`, `specline_link`,
 `specline_next`, `specline_claim`, `specline_close`. Thirteen rather than
