@@ -7,6 +7,38 @@
 
 *Nothing here is decided. Do not build on any of it without saying so.*
 
+### Does a Mac app become the front door for other editors, and does it own the daemon?
+
+`que_01M1HQQZE3PCWMVM7MH822FGFF` · question · open · severity medium
+
+**Needs KB.** Nothing is blocked on it — the near-term fixes stand on their own — but it decides how the next two phases are shaped, so it is worth answering before either is planned.
+
+The prompt was a user saying Specline "fails silently" when it is not connected, plus KB's thought that reviving the suspended Tauri app, running the daemon from it, and showing a tray icon might answer that and the multi-client goal at once.
+
+**The two are separate problems and only one of them is about an app.**
+
+The silent failure is a bug with an address: `hook::session_start` returns without printing when `/api/context` is unreachable, and the MCP transport is HTTP to `127.0.0.1:7654/mcp`, so a daemon that is down means the `specline_*` tools never appear at all. A model cannot report the absence of a tool it cannot see. That is filed as KEEL-354 and is roughly ten lines. A tray icon would not have caught it, because the person is looking at a terminal at the moment the damage is done.
+
+**What the app is actually for is connecting other clients, and that is a real problem.**
+
+Today the only front door is a Claude Code plugin and a marketplace entry. Codex, Cursor, Windsurf and Zed have no such thing; each has its own config file in its own place with its own shape. Something has to write those files, and `plugin/scripts/setup.sh` is Claude Code-shaped all the way through.
+
+The good news is the architecture is already right for this and nobody has to change it. HTTP on a fixed localhost port means one daemon serves every client at once, which is exactly what hard constraint 1 wants — one writer, one lock. Per-client stdio servers would have four processes contending for a store that is designed for one.
+
+**Three options.**
+
+**1. The app owns the daemon.** Tauri app launches and supervises it; tray shows state. This is the version to reject. Quitting the app would take every connected editor down with it, which is a new failure mode and a likelier one than the current bug, because people quit apps and nobody quits a launchd agent. It also makes a Mac app a hard dependency for a product that ships Linux binaries.
+
+**2. The app watches the daemon.** launchd stays the supervisor; the app is an ordinary client of `/api/health` with a tray light, a restart button, a list of which editors are connected, and a notification when the daemon dies. The app can crash, be quit, or never be installed and nothing breaks. Everything it does is also available from the CLI.
+
+**3. No app yet — a `specline connect` verb.** The genuinely hard part of multi-client is knowing each editor's config location and format and writing it without breaking what is there. That is CLI work, it is testable, and it is needed by option 2 anyway. An app built after it is a thin shell over proven code rather than the place the logic lives.
+
+**Recommendation: 3, then 2, and never 1.** The order matters more than the choice. Doing the CLI verb first means the app stays optional forever, which keeps Linux first-class and keeps logic out of a surface that cannot be tested the way the rest of this is.
+
+**The cost nobody has priced yet is notarization.** Distribution deliberately avoids Apple's $99 a year, and the argument for that is written into `scripts/verify-release-tier1.sh`: `curl` does not set `com.apple.quarantine`, so a downloaded CLI binary runs. A `.app` fetched in a browser is quarantined, and the first run becomes a Gatekeeper refusal and a trip through System Settings. For something whose pitch is that it sits quietly beside your agent, that is a bad first thirty seconds. So an app means either paying and notarising, or shipping a worse install than the CLI already has. That is a decision rather than a detail, and it should be made before the app is built rather than discovered at release.
+
+**Two smaller things worth deciding with it.** Whether an `initialize` response should carry a "the daemon is not running" state so a client that has no hook mechanism can still be told — that is what makes the fix general rather than Claude Code only. And whether a stdio shim should exist alongside the HTTP transport for clients that cannot hold a connection, given a shim holds no lock and so does not threaten the one-writer rule.
+
 ### How does triage reach MCP without a fourteenth tool?
 
 `que_01M0D6DWN1WPVXAHAJRANB6P48` · question · open

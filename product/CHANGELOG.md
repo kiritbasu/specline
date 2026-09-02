@@ -1,15 +1,23 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T18:52:01Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T19:15:04Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (312)
+## Closed work (313)
 
 ### 2026-09-02
+
+- **KEEL-354** The session hook goes quiet when the daemon is down, instead of saying so — `done`
+
+  A session start that cannot reach the daemon now injects a message saying so, naming the address, the cause and what to do — and telling the model to pass it on rather than working as though Specline were not installed. The three causes say different things, because starting a daemon that is already running is the wrong advice.
+  
+  The test that covered this was asserting the bug, so it was replaced rather than added to: three integration tests for refused, listening-but-broken, and the silence that is still correct when the daemon answers with nothing, plus two unit tests for the arm a real socket cannot reach deterministically. Both clippy configurations and both suites are clean — 1,270 tests with embeddings on, 1,269 without, and the hook suite passes with an empty HOME.
+
+  <sub>commit:0397889 · test:cargo test --workspace · test:cargo test --workspace --exclude specline-embed --no-default-features</sub>
 
 - **KEEL-352** Verify the repository builds and tests clean from the external drive — `done`
 
@@ -1464,6 +1472,17 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (125 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (782 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T18:59:33.022418Z |
+| 2026-09-02 | claude | revised question “Does a Mac app become the front door for other editors, and does it own the daemon?” to v1 |
+| 2026-09-02 | claude | created question “Does a Mac app become the front door for other editors, and does it own the daemon?” |
+| 2026-09-02 | claude | created task “The session hook goes quiet when the daemon is down, instead of saying so” |
+| 2026-09-02 | claude | created feedback “A user asked for a heads-up when Specline is not connected, because it currently fails silently. In their words: "One small suggestion: a heads-up when Specline isn't connected would help, since it currently fails silently."” |
 | 2026-09-02 | claude | created task “Install-script testing leaves dead lines in the tester's ~/.zshrc” |
 | 2026-09-02 | claude | revised decision “The working copy lives on the external drive, and the project row points at it” to v1 |
 | 2026-09-02 | claude | created decision “The working copy lives on the external drive, and the project row points at it” |
@@ -1653,17 +1672,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status todo → done |
 | 2026-08-19 | claude | evidence [] → (134 characters) |
 | 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (323 characters) |
-| 2026-08-19 | claude | revised decision “Phases and releases get a screen each, and the roadmap groups by state” to v1 |
-| 2026-08-19 | claude | created decision “Phases and releases get a screen each, and the roadmap groups by state” |
-| 2026-08-19 | claude | created task “Split the Roadmap: phases grouped by state, releases on a screen of their own” |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (189 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (454 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T11:44:37.582422Z |
 
-*Showing the 200 most recent of 2639 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2650 changes. Use `specline_activity` for the rest.*
 
