@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:10:33Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:22:30Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (319)
+## Closed work (320)
 
 ### 2026-09-02
+
+- **KEEL-362** Tidy the clients endpoint after the fact — `done`
+
+  The row shaping is `client_row` now, carrying the reasoning for the one field name on it that is a decision rather than a transcription — the store says `last_seen`, the API says `last_wrote`, and that argument belongs beside the name rather than forty lines up in the endpoint's doc. The two lookup arms answer in the same shape and say so, instead of being flattened by an `into_iter().collect()` doing quiet work at the end of one of them.
+  
+  Nothing changed behaviour: 1,292 and 1,291 in Rust and 385 in the app, identical before and after, with no test modified to keep it passing.
+  
+  Two candidates rejected rather than missed, and the reasoning is in the commit. `display_name` still travels despite being derivable, so the rule for choosing between a title and a name is applied once in the daemon rather than by everything that renders one. And the app's `catch` fallback still repeats the empty response shape inline, because it is one line that reads as exactly what it is.
+
+  <sub>commit:c6fd2b7 · test:cargo test --workspace · test:npm test --prefix apps/desktop</sub>
 
 - **KEEL-361** Show the editor a row came from, in the app and the API — `done`
 
@@ -1543,6 +1553,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (86 characters) |
 | 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (980 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T22:22:06.640171Z |
+| 2026-09-02 | claude | created task “Tidy the clients endpoint after the fact” |
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (86 characters) |
+| 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (963 characters) |
 | 2026-09-02 | claude | status todo → in_progress |
 | 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
@@ -1732,14 +1750,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | created decision “Closing is what you do to anything that is dealt with, not only to a task” |
 | 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → ["commit:f3dcc8a","test:cargo test -p specline-core --test inbox"] |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (379 characters) |
-| 2026-08-19 | claude | created task “A signal can be cleared out of the Inbox with no outcome, going round work::triage” |
-| 2026-08-19 | claude | revised question “How does triage reach MCP without a fourteenth tool?” to v1 |
-| 2026-08-19 | claude | created question “How does triage reach MCP without a fourteenth tool?” |
-| 2026-08-19 | claude | created task “Notes are not in the search index, so every finding recorded on a task is unfindable” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
 
-*Showing the 200 most recent of 2701 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2709 changes. Use `specline_activity` for the rest.*
 
