@@ -285,3 +285,41 @@ fn a_note_records_the_client_even_though_it_appends_no_event() {
         .expect("a note-only session still names its client");
     assert_eq!(recorded.client.display_name(), "Codex");
 }
+
+/// A limit larger than the column type still means "everything".
+///
+/// Worth being exact about what this does and does not prove, because the
+/// first version of it claimed more. `usize::MAX as i64` is -1 and SQLite
+/// reads a negative LIMIT as unbounded, so the old cast and the saturating
+/// `try_from` return the *same rows* — any ceiling at or above the row count
+/// returns all of them. The cast was lossy and made a reader stop; it was
+/// never a behaviour bug, and a test asserting that it was would pass for a
+/// reason that is not true.
+///
+/// What is worth guarding is the direction a careless fix would break. Clamping
+/// to a smaller type — `u32::try_from(limit).unwrap_or(0)`, say — would turn an
+/// enormous limit into no rows at all, which is silent and wrong and is exactly
+/// the shape of thing somebody reaches for when a cast looks unsafe.
+#[test]
+fn an_enormous_limit_asks_for_everything_rather_than_nothing() {
+    let (mut store, _dir) = store();
+
+    for n in 0..3 {
+        let provenance = Provenance::anonymous(Actor::Claude)
+            .with_session(format!("ses_{n}"))
+            .with_surface(Surface::Code)
+            .with_client(codex());
+        write_as(&mut store, &provenance, &format!("task {n}"));
+    }
+
+    assert_eq!(
+        store.session_clients(usize::MAX).unwrap().len(),
+        3,
+        "a limit past what the column can hold must not collapse to zero"
+    );
+    assert_eq!(
+        store.session_clients(2).unwrap().len(),
+        2,
+        "and an ordinary limit still limits"
+    );
+}

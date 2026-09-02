@@ -59,33 +59,36 @@ export function TaskScreen({
   const project = route.project;
   const id = route.taskId;
 
-  // Six requests, deliberately not folded into one. Each answers a different
+  // Five requests, deliberately not folded into one. Each answers a different
   // question of a different part of the store, and the daemon is on localhost
   // — the alternative is an endpoint that exists only to serve this screen and
   // has to change every time the screen does.
   const core = useAsync(async () => {
     if (!id) return null;
-    const [entity, notes, history, outbound, inbound, clients] =
-      await Promise.all([
-        api.entity(id),
-        api.notesFor(id),
-        api.history(id),
-        api.graph(id, "outbound", 1),
-        api.graph(id, "inbound", 1),
-        // Which editor wrote each note. One request for the screen rather than
-        // one per note, and a lookup by session id afterwards.
-        //
-        // Its failure is swallowed, and that is deliberate rather than lazy.
-        // Everything else here is the page; this is a label on part of it, and
-        // a `Promise.all` makes any rejection the whole screen's. A daemon
-        // older than this endpoint — the ordinary state of an app updated
-        // before the binary under it — would blank the task page to avoid
-        // naming an editor. Falling back to none collapses into the state the
-        // display already handles: unknown, and so nothing shown.
-        api.clients().catch(() => ({ clients: [], total: 0 })),
-      ]);
-    return { entity, notes, history, outbound, inbound, clients };
+    const [entity, notes, history, outbound, inbound] = await Promise.all([
+      api.entity(id),
+      api.notesFor(id),
+      api.history(id),
+      api.graph(id, "outbound", 1),
+      api.graph(id, "inbound", 1),
+    ]);
+    return { entity, notes, history, outbound, inbound };
   }, [id, generation]);
+
+  // Which editor drove each conversation, for the notes below.
+  //
+  // Its own request, and keyed on the generation rather than the task, for two
+  // separate reasons. The map is identical for every task, so folding it into
+  // the fetch above refetched two hundred rows on every J and K — on the one
+  // interaction built to be fast.
+  //
+  // And a separate `useAsync` is what makes its failure survivable. Inside a
+  // `Promise.all` any rejection is the whole screen's, so a daemon older than
+  // this endpoint — the ordinary state of an app updated ahead of the binary
+  // under it — blanked the task page rather than omit a label. Here a failure
+  // leaves `data` null and the notes simply do not name an editor, which is
+  // the state the display already handles: unknown, so nothing shown.
+  const clients = useAsync(() => api.clients(), [generation]);
 
   // The siblings, so J and K walk the board's own order, and the milestones, so
   // a milestone reads as its name rather than as a ULID.
@@ -316,7 +319,7 @@ export function TaskScreen({
               that looks like a broken button. */}
           <NoteStream
             notes={core.data?.notes.notes ?? []}
-            clients={core.data?.clients.clients ?? []}
+            clients={clients.data?.clients ?? []}
             entityId={task ? String(task.id) : undefined}
             onAdded={core.reload}
           />

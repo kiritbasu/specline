@@ -1649,12 +1649,19 @@ impl EntityStore for Store {
     }
 
     fn session_clients(&self, limit: usize) -> Result<Vec<SessionClient>> {
+        // Saturate rather than cast, for legibility rather than for a bug.
+        // `usize::MAX as i64` is -1 and SQLite reads a negative LIMIT as no
+        // upper bound, so the cast and this returned identical rows — any
+        // ceiling at or above the row count returns all of them. What it cost
+        // was a reader working out that a wrapped negative happened to mean the
+        // right thing. `try_from` says the intent instead of arriving at it.
+        let ceiling = i64::try_from(limit).unwrap_or(i64::MAX);
         query_session_clients(
             self.connection(),
             &format!(
                 "{SESSION_CLIENT_COLUMNS} FROM session_clients ORDER BY last_seen DESC LIMIT ?"
             ),
-            vec![Value::Integer(limit as i64)],
+            vec![Value::Integer(ceiling)],
         )
     }
 
