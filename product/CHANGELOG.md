@@ -1,6 +1,6 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:24:00Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:33:07Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
@@ -1596,6 +1596,11 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T23:28:41.939329Z |
+| 2026-09-02 | claude | created task “Cut 0.5.1” |
+| 2026-09-02 | claude | created milestone “0.5.1” |
 | 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → ["commit:04a2dd7"] |
 | 2026-09-02 | claude | close_reason none → done |
@@ -1791,11 +1796,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T16:33:41.853794Z |
 | 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → ["commit:131ab51","test:npx vitest run src/lib/tasks.test.ts"] |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (312 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
 
-*Showing the 200 most recent of 2745 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2750 changes. Use `specline_activity` for the rest.*
 

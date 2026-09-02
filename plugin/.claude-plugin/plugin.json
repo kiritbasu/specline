@@ -1,6 +1,6 @@
 {
   "name": "specline",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Specline — the local-first store for everything about a software project except the code. Adds the Specline MCP server, the skills that teach when to write to it, and the session hooks that put the project's state in front of you.",
   "author": {
     "name": "KB"
