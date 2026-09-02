@@ -1,6 +1,6 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T18:46:16Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T18:52:01Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
@@ -1464,6 +1464,7 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | created task “Install-script testing leaves dead lines in the tester's ~/.zshrc” |
 | 2026-09-02 | claude | revised decision “The working copy lives on the external drive, and the project row points at it” to v1 |
 | 2026-09-02 | claude | created decision “The working copy lives on the external drive, and the project row points at it” |
 | 2026-09-02 | claude | root_path /Users/h8hcn/development/specline → /Volumes/mydrv/development/specline |
@@ -1663,7 +1664,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status todo → in_progress |
 | 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T11:44:37.582422Z |
-| 2026-08-19 | claude | created task “Fix what the review found in the roadmap progress work” |
 
-*Showing the 200 most recent of 2638 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2639 changes. Use `specline_activity` for the rest.*
 
