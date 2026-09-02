@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:07:29Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:20:37Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (322)
+## Closed work (323)
 
 ### 2026-09-02
+
+- **KEEL-366** The README says how to install Specline and never how to stop or remove it — `done`
+
+  The README now has both halves. Stopping leads with the trap — `kill` brings the daemon straight back, because launchd has `KeepAlive` and the systemd unit has `Restart=always` — and gives the service-manager commands for each platform. Uninstalling is five ordered steps with the irreversible one last and a backup beside it, because the store is the only part no reinstall brings back.
+  
+  It also fixed a wrong command in Specline's own output. The refusal `specline update` prints when a release moves the schema told the reader to run `specline backup <dir>`, which that command rejects — it takes `--dest`. The README draft had copied the same form from it, which is how a wrong instruction spreads.
+  
+  Every macOS command in the section has been run today. The Linux ones name the unit setup.sh installs and have not been, and the commit says so.
+
+  <sub>commit:7544921 · test:cargo test --workspace</sub>
 
 - **KEEL-365** Cut 0.5.0 — `done`
 
@@ -1573,6 +1583,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → ["commit:7544921","test:cargo test --workspace"] |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (848 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T23:15:48.807586Z |
+| 2026-09-02 | claude | created task “The README says how to install Specline and never how to stop or remove it” |
+| 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (112 characters) |
 | 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (712 characters) |
@@ -1764,14 +1782,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status todo → in_progress |
 | 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T16:06:54.828842Z |
-| 2026-08-19 | claude | “Phase 14 — Feature requests: the Inbox and the lifecycle” blocks “Cut 0.4.1 — the rail without its shortcuts, and the signal…” |
-| 2026-08-19 | claude | created task “Cut 0.4.1 — the rail without its shortcuts, and the signal lifecycle” |
-| 2026-08-19 | claude | retracted a note on tsk_01M0DB5TTNDFT9DR6DNXY3GBZ4 |
-| 2026-08-19 | claude | status todo → done |
-| 2026-08-19 | claude | evidence [] → ["commit:b53121e","test:npx vitest run src/App.test.tsx"] |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (265 characters) |
-| 2026-08-19 | claude | triaged false → true |
 
-*Showing the 200 most recent of 2729 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2737 changes. Use `specline_activity` for the rest.*
 
