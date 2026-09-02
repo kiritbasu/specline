@@ -411,6 +411,12 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
     }
 
     let header_of = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    // Read before the era, because the two answer different questions and the
+    // handshake needs this one: the era says how to read the request, this says
+    // which revision to claim back. Answering in a revision the caller did not
+    // offer is what locked Codex out (KEEL-355).
+    let asked_for =
+        specline_mcp::protocol::requested_version(&request, header_of(HEADER_PROTOCOL_VERSION));
     let era = match check_headers(
         &request,
         header_of(HEADER_METHOD),
@@ -443,7 +449,9 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
     let result = match request.method.as_str() {
         // The 2025-11-25 handshake. Removed in the current revision, but this
         // is what Claude Code actually opens with.
-        "initialize" => Ok(initialize_result(era)),
+        "initialize" => Ok(initialize_result(
+            specline_mcp::protocol::negotiated_version(asked_for.as_deref()),
+        )),
         // Also 2025-11-25. Cheap to answer and its absence looks like a dead
         // connection to a client that uses it as a keep-alive.
         "ping" => Ok(json!({})),

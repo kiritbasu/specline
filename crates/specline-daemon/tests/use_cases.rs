@@ -240,9 +240,16 @@ async fn the_2025_11_25_handshake_is_answered_in_its_own_dialect() {
     assert_eq!(body["result"]["serverInfo"]["name"], "specline");
 }
 
+/// An older revision is served, where it used to be told what it was missing.
+///
+/// The name this test had — "is told what it does speak" — was the whole
+/// mistake in six words. Being told is no use to a client that has been hung up
+/// on, and every one of them was: Codex opens with 2025-06-18 and never saw a
+/// single tool (KEEL-355). 2024-11-05 is the HTTP+SSE era, and while this
+/// daemon does not serve that transport, `tools/list` over POST is identical,
+/// so there is nothing to refuse.
 #[tokio::test]
-async fn a_version_this_server_does_not_speak_is_told_what_it_does() {
-    // 2024-11-05 is the HTTP+SSE era, which this daemon does not serve.
+async fn a_client_on_an_older_revision_is_served() {
     let d = Daemon::start().await;
     let response = d
         .client
@@ -254,11 +261,10 @@ async fn a_version_this_server_does_not_speak_is_told_what_it_does() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status().as_u16(), 400);
+    assert_eq!(response.status().as_u16(), 200);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"]["code"], -32022, "UnsupportedProtocolVersion");
-    assert_eq!(body["error"]["data"]["supported"][0], PROTOCOL_VERSION);
-    assert_eq!(body["error"]["data"]["supported"][1], "2025-11-25");
+    assert!(body.get("error").is_none(), "{body}");
+    assert!(body["result"]["tools"].is_array(), "{body}");
 }
 
 #[tokio::test]

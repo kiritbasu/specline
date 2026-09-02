@@ -29,8 +29,77 @@ pub const PROTOCOL_VERSION: &str = "2026-07-28";
 /// and not. See DECISIONS B-17.
 pub const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";
 
+/// The revisions served with legacy behaviour, newest first.
+///
+/// All three are Streamable HTTP, which is the line that decides membership
+/// rather than age. From 2025-03-26 onwards a revision is a POST to one
+/// endpoint, an `initialize` handshake, no mirrored headers and no
+/// `resultType` — identical to each other for the two methods Specline
+/// exposes. Listing them claims that `tools/list` and `tools/call` behave the
+/// same across them, which is true, and nothing more.
+///
+/// **2024-11-05 is deliberately absent.** It is the HTTP+SSE transport, where
+/// the client opens a `GET` stream this daemon answers 405 to. Echoing it back
+/// would tell such a client its transport is supported and then fail it on the
+/// next request; offering it 2025-11-25 instead lets it decide, which is what
+/// the counter-offer arm of [`negotiated_version`] is for.
+///
+/// The list exists so a client is answered with **its own** revision rather
+/// than a different one. The specification's version negotiation says a server
+/// that supports what was requested MUST echo it, and only otherwise offers an
+/// alternative; a client handed an alternative is entitled to hang up. Codex
+/// opens with 2025-06-18, and hanging up is exactly what it did (KEEL-355).
+pub const LEGACY_VERSIONS: [&str; 3] = [LEGACY_PROTOCOL_VERSION, "2025-06-18", "2025-03-26"];
+
 /// Every revision this daemon serves, newest first.
-pub const SUPPORTED_VERSIONS: [&str; 2] = [PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION];
+///
+/// Advertised by `server/discover`, so it is a promise rather than a note.
+/// `supported_versions_and_legacy_versions_agree` keeps it in step with
+/// [`LEGACY_VERSIONS`].
+pub const SUPPORTED_VERSIONS: [&str; 4] = [
+    PROTOCOL_VERSION,
+    LEGACY_PROTOCOL_VERSION,
+    "2025-06-18",
+    "2025-03-26",
+];
+
+/// Which revision a request names, wherever it happens to name it.
+///
+/// The header is authoritative when present. An `initialize` request declares
+/// it in the body instead, because the header did not exist when that method
+/// did. Absent everywhere means a client older than the header itself.
+///
+/// One function rather than two readings of the same three places: the header
+/// check and the handshake answer have to agree about what was asked for, and
+/// the surest way for them to disagree is to work it out separately.
+pub fn requested_version(request: &Request, version_header: Option<&str>) -> Option<String> {
+    version_header
+        .map(str::to_owned)
+        .or_else(|| {
+            request
+                .params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .or_else(|| request.declared_version())
+}
+
+/// The revision to answer `initialize` with, given what the client asked for.
+///
+/// Echo when the request names something served; otherwise offer the newest
+/// legacy revision rather than the newest overall. That looks backwards and is
+/// not: a client old enough to name an unknown revision will not be sending
+/// mirrored headers, so answering 2026-07-28 would agree on a dialect it
+/// cannot then speak. Offering the permissive one leaves it able to continue,
+/// and a client that cannot live with the answer disconnects — which is the
+/// specification's own remedy and is still better than the error this replaces.
+pub fn negotiated_version(requested: Option<&str>) -> &str {
+    match requested {
+        Some(v) if SUPPORTED_VERSIONS.contains(&v) => v,
+        _ => LEGACY_PROTOCOL_VERSION,
+    }
+}
 
 /// Which revision a request belongs to.
 ///
@@ -368,20 +437,7 @@ pub fn check_headers(
     name_header: Option<&str>,
     version_header: Option<&str>,
 ) -> HeaderCheck {
-    // Which revision is this? The header is authoritative when present. An
-    // `initialize` request declares it in the body instead, because the header
-    // did not exist when that method did. Absent everywhere means a client
-    // older than the header itself, which is legacy by definition.
-    let declared = version_header
-        .map(str::to_owned)
-        .or_else(|| {
-            request
-                .params
-                .get("protocolVersion")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .or_else(|| request.declared_version());
+    let declared = requested_version(request, version_header);
 
     // Both revisions negotiate. TQ-11 closed legacy negotiation and the
     // consequence was immediate and total: Claude Code 2.1.185 speaks
@@ -391,24 +447,36 @@ pub fn check_headers(
     //
     // What made the removal safe to undo is that nothing was actually deleted:
     // `Era` stayed, because the response envelope branches on it regardless.
+    // Only the current revision gets the strict treatment. Everything else —
+    // a listed older revision, an unrecognised one, or nothing at all — is
+    // served as legacy.
+    //
+    // The unrecognised arm used to be a refusal, and the refusal was the bug.
+    // Codex opens with 2025-06-18, got `this server speaks 2026-07-28 and
+    // 2025-11-25, not 2025-06-18`, retried once and gave up, so none of the
+    // thirteen tools ever appeared (KEEL-355). B-17 had already fixed this
+    // exact failure for Claude Code by adding one version; adding a second
+    // would fix Codex and leave the next client to find it again. So the arm
+    // itself goes. Version negotiation belongs in the answer — see
+    // [`negotiated_version`] — not in a door that only opens for names on a
+    // list.
+    //
+    // The fair objection is that a client can now skip the mirrored-header
+    // check by naming a revision that does not require it. It could already:
+    // the `None` arm has always read a request with no version at all as
+    // legacy, because that is what Claude Code's first request looks like. So
+    // the opt-out was one absent header away before this change and is one
+    // absent header away after it — what changed is how many spellings reach
+    // it, which is not a boundary anybody was defending.
+    //
+    // The check is a consistency guarantee between an intermediary that routes
+    // on the header and a server that executes on the body, and it is worth
+    // keeping for clients that opt into the strict revision. It is not an
+    // access control, and nothing here is: `origin_ok` and the token layer are,
+    // and neither of them moved.
     let era = match declared.as_deref() {
         Some(PROTOCOL_VERSION) => Era::Modern,
-        Some(LEGACY_PROTOCOL_VERSION) => Era::Legacy,
-        // Older than the version header itself. Legacy by definition — this is
-        // the arm Claude Code's very first request lands on.
-        None => Era::Legacy,
-        Some(other) => {
-            return HeaderCheck::Reject(
-                RpcError::new(
-                    codes::UNSUPPORTED_PROTOCOL_VERSION,
-                    format!(
-                        "this server speaks {PROTOCOL_VERSION} and {LEGACY_PROTOCOL_VERSION}, \
-                         not {other}"
-                    ),
-                )
-                .with_data(json!({ "supported": SUPPORTED_VERSIONS })),
-            );
-        }
+        _ => Era::Legacy,
     };
 
     // The mirrored headers are required only by the current revision. A legacy
@@ -495,9 +563,17 @@ pub const INSTRUCTIONS: &str = "Specline stores everything about a software proj
 /// check, and be told the server speaks 2025-11-25. Answering a handshake in a
 /// dialect the caller did not offer is how a connection dies at the first
 /// request with nothing useful in the log.
-pub fn initialize_result(era: Era) -> Value {
+///
+/// It now takes the version rather than the era, because those stopped being
+/// the same question. An era is which dialect the *request* is read in, and
+/// there are two; the version is which one the *answer* claims, and there are
+/// five. Passing the era meant every legacy client was answered `2025-11-25`
+/// whatever it had asked for — the same "dialect the caller did not offer"
+/// failure the paragraph above describes, surviving inside its own fix.
+/// [`negotiated_version`] is what to pass.
+pub fn initialize_result(version: &str) -> Value {
     json!({
-        "protocolVersion": era.version(),
+        "protocolVersion": version,
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": server_info(),
         "instructions": INSTRUCTIONS,
@@ -583,24 +659,26 @@ mod tests {
         );
     }
 
+    /// This used to assert the refusal, and the refusal was the bug.
+    ///
+    /// It named 2024-11-05 as a revision "this server never spoke" and checked
+    /// that saying so listed the alternatives. Listing alternatives in an error
+    /// is not negotiation — the client has already been turned away by the time
+    /// it reads them, which is exactly what Codex did (KEEL-355). The old
+    /// revisions are served now, so the request goes through instead.
     #[test]
-    fn an_unsupported_version_lists_what_is_supported() {
+    fn an_older_revision_is_served_rather_than_turned_away() {
         let r = call("specline_context");
-        match check_headers(
-            &r,
-            Some("tools/call"),
-            Some("specline_context"),
-            // 2024-11-05 is the HTTP+SSE era, which this server never spoke.
-            Some("2024-11-05"),
-        ) {
-            HeaderCheck::Reject(e) => {
-                assert_eq!(e.code, codes::UNSUPPORTED_PROTOCOL_VERSION);
-                let data = e.data.unwrap();
-                assert_eq!(data["supported"][0], PROTOCOL_VERSION);
-                assert_eq!(data["supported"][1], LEGACY_PROTOCOL_VERSION);
-            }
-            HeaderCheck::Ok(_) => panic!("should have been rejected"),
-        }
+        assert_eq!(
+            check_headers(
+                &r,
+                Some("tools/call"),
+                Some("specline_context"),
+                Some("2024-11-05"),
+            ),
+            HeaderCheck::Ok(Era::Legacy),
+            "an older revision is read as legacy, not refused",
+        );
     }
 
     #[test]
@@ -723,13 +801,115 @@ mod tests {
         // opened the handshake correctly and was told the server speaks
         // 2025-11-25 — a connection that dies at the first request with
         // nothing useful in the log.
-        let legacy = initialize_result(Era::Legacy);
+        let legacy = initialize_result(LEGACY_PROTOCOL_VERSION);
         assert_eq!(legacy["protocolVersion"], LEGACY_PROTOCOL_VERSION);
         assert_eq!(legacy["serverInfo"]["name"], "specline");
         assert!(legacy["capabilities"]["tools"].is_object());
 
-        let modern = initialize_result(Era::Modern);
+        let modern = initialize_result(PROTOCOL_VERSION);
         assert_eq!(modern["protocolVersion"], PROTOCOL_VERSION);
+    }
+
+    /// Two lists that must not drift.
+    ///
+    /// `SUPPORTED_VERSIONS` is what `server/discover` promises; `LEGACY_VERSIONS`
+    /// is what gets legacy treatment. They are written out separately because
+    /// Rust cannot concatenate const arrays, which is exactly the kind of
+    /// duplication that rots — a revision added to one and not the other would
+    /// either be advertised and then refused, or served and never mentioned.
+    #[test]
+    fn supported_versions_and_legacy_versions_agree() {
+        let mut expected = vec![PROTOCOL_VERSION];
+        expected.extend(LEGACY_VERSIONS);
+        assert_eq!(SUPPORTED_VERSIONS.to_vec(), expected);
+    }
+
+    /// The HTTP+SSE revision is not claimed.
+    ///
+    /// A 2024-11-05 client opens a `GET` stream, which this daemon answers 405.
+    /// Echoing its version back would say the transport works and then fail it
+    /// on the very next request, so it gets a counter-offer instead.
+    #[test]
+    fn the_http_sse_revision_is_offered_an_alternative_rather_than_echoed() {
+        assert!(!SUPPORTED_VERSIONS.contains(&"2024-11-05"));
+        assert_eq!(
+            negotiated_version(Some("2024-11-05")),
+            LEGACY_PROTOCOL_VERSION
+        );
+    }
+
+    /// The half the era could not express.
+    ///
+    /// Passing an era answered every pre-2026 client `2025-11-25` whatever it
+    /// had asked for, which is the same "dialect the caller did not offer"
+    /// failure the test above exists to prevent, one revision down.
+    #[test]
+    fn a_served_revision_is_echoed_rather_than_replaced() {
+        for asked in LEGACY_VERSIONS {
+            assert_eq!(
+                negotiated_version(Some(asked)),
+                asked,
+                "a revision this daemon serves must come back as itself"
+            );
+        }
+        assert_eq!(negotiated_version(Some(PROTOCOL_VERSION)), PROTOCOL_VERSION);
+    }
+
+    /// An unknown revision is answered, not refused.
+    ///
+    /// The offer is the *permissive* revision rather than the newest, and that
+    /// is deliberate: a client naming something unrecognised will not be
+    /// mirroring headers, so agreeing on 2026-07-28 would settle on a dialect
+    /// it cannot speak and fail on the request after this one.
+    #[test]
+    fn an_unknown_revision_is_offered_one_that_works() {
+        for asked in [Some("2027-01-01"), Some("banana"), Some(""), None] {
+            assert_eq!(
+                negotiated_version(asked),
+                LEGACY_PROTOCOL_VERSION,
+                "asked for {asked:?}"
+            );
+        }
+    }
+
+    /// The request Codex actually sends, byte for byte off the wire.
+    ///
+    /// Captured from `codex-mcp-client/0.148.0-alpha.15` through a logging
+    /// proxy in front of the daemon. It was refused with
+    /// `-32022 this server speaks 2026-07-28 and 2025-11-25, not 2025-06-18`,
+    /// Codex retried once and gave up, and none of the thirteen tools ever
+    /// appeared (KEEL-355). Written from the capture rather than from the
+    /// documentation, because the two had already disagreed once.
+    #[test]
+    fn the_request_codex_actually_sends_negotiates() {
+        let init = request(
+            "initialize",
+            json!({
+                "protocolVersion": "2025-06-18",
+                "capabilities": { "elicitation": { "form": {}, "url": {} } },
+                "clientInfo": {
+                    "name": "codex-mcp-client",
+                    "title": "Codex",
+                    "version": "0.148.0-alpha.15"
+                }
+            }),
+        );
+
+        // Codex sends none of the mirrored headers, so this must pass on the
+        // body alone.
+        assert_eq!(
+            check_headers(&init, None, None, None),
+            HeaderCheck::Ok(Era::Legacy),
+            "the client must get in"
+        );
+
+        let asked = requested_version(&init, None);
+        assert_eq!(asked.as_deref(), Some("2025-06-18"));
+        assert_eq!(
+            initialize_result(negotiated_version(asked.as_deref()))["protocolVersion"],
+            "2025-06-18",
+            "answering with a different revision is what it hung up over"
+        );
     }
 
     #[test]
@@ -764,16 +944,35 @@ mod tests {
         ));
     }
 
+    /// An unknown revision negotiates, and is answered with a real one.
+    ///
+    /// The inverse of this test used to stand — "an unknown revision must not
+    /// negotiate" — and it is the sentence that locked Codex out. Refusing a
+    /// name protects nothing: whatever the request calls itself, it still has
+    /// to be a well-formed `tools/call` for a tool that exists.
+    ///
+    /// What is worth asserting is that the answer is honest. A client told
+    /// `1999-01-01` back would have no way to know the version was never
+    /// understood.
     #[test]
-    fn an_unknown_revision_is_still_refused_and_says_what_is_served() {
+    fn an_unknown_revision_negotiates_and_is_answered_honestly() {
         let init = request(
             "initialize",
             json!({ "protocolVersion": "1999-01-01", "capabilities": {} }),
         );
-        let HeaderCheck::Reject(err) = check_headers(&init, None, None, None) else {
-            panic!("an unknown revision must not negotiate");
-        };
-        assert_eq!(err.code, codes::UNSUPPORTED_PROTOCOL_VERSION);
+
+        assert_eq!(
+            check_headers(&init, None, None, None),
+            HeaderCheck::Ok(Era::Legacy),
+        );
+
+        let asked = requested_version(&init, None);
+        let answered = negotiated_version(asked.as_deref());
+        assert_eq!(answered, LEGACY_PROTOCOL_VERSION);
+        assert_ne!(
+            answered, "1999-01-01",
+            "echoing a revision back unread would tell the client it is understood",
+        );
     }
 
     #[test]

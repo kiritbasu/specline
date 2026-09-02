@@ -121,8 +121,17 @@ async fn a_request_with_no_version_anywhere_is_served_as_legacy() {
     assert!(body["result"]["tools"].is_array(), "{body}");
 }
 
+/// An unrecognised version is served, not refused.
+///
+/// This asserted the refusal, and listed the two revisions that did work, and
+/// was green for as long as the daemon locked out every client that spoke
+/// anything else. Codex speaks 2025-06-18: it was told the server speaks
+/// 2026-07-28 and 2025-11-25, retried once and gave up, and not one of the
+/// thirteen tools ever appeared (KEEL-355).
+///
+/// Naming what does work is only useful to a client still connected to read it.
 #[tokio::test]
-async fn an_unsupported_version_is_refused_with_the_ones_that_work() {
+async fn an_unrecognised_version_is_served_rather_than_refused() {
     let (base, _dir) = daemon().await;
 
     let (status, body) = post(
@@ -132,13 +141,50 @@ async fn an_unsupported_version_is_refused_with_the_ones_that_work() {
     )
     .await;
 
-    assert_eq!(status, 400);
-    assert_eq!(body["error"]["code"], codes::UNSUPPORTED_PROTOCOL_VERSION);
-    let supported = body
-        .pointer("/error/data/supported")
-        .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("the refusal should list what does work: {body}"));
-    assert_eq!(supported.len(), 2);
+    assert_eq!(status, 200, "{body}");
+    assert!(body["result"]["tools"].is_array(), "{body}");
+}
+
+/// The handshake Codex actually sends, end to end through the daemon.
+///
+/// Captured off the wire from `codex-mcp-client/0.148.0-alpha.15` — no
+/// mirrored headers, `2025-06-18` in the body. The version it gets back has to
+/// be its own: a client handed a revision it did not offer is entitled to hang
+/// up, and hanging up is what it did.
+#[tokio::test]
+async fn the_handshake_codex_sends_is_answered_in_codexs_own_revision() {
+    let (base, _dir) = daemon().await;
+
+    let (status, body) = post(
+        &base,
+        &[],
+        rpc(
+            "initialize",
+            json!({
+                "protocolVersion": "2025-06-18",
+                "capabilities": { "elicitation": { "form": {}, "url": {} } },
+                "clientInfo": {
+                    "name": "codex-mcp-client",
+                    "title": "Codex",
+                    "version": "0.148.0-alpha.15"
+                }
+            }),
+        ),
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["result"]["protocolVersion"], "2025-06-18", "{body}");
+
+    // And the tools have to be reachable afterwards, which is the thing the
+    // handshake was in the way of.
+    let (status, body) = post(&base, &[], rpc("tools/list", json!({}))).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["result"]["tools"].as_array().map(Vec::len),
+        Some(13),
+        "{body}"
+    );
 }
 
 /// The mirrored headers exist because an intermediary may route on the header

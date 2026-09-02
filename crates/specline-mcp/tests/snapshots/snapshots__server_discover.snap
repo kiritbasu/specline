@@ -1,6 +1,5 @@
 ---
 source: crates/specline-mcp/tests/snapshots.rs
-assertion_line: 86
 expression: "specline_mcp::discover_result()"
 ---
 {
@@ -11,6 +10,8 @@ expression: "specline_mcp::discover_result()"
   },
   "instructions": "Specline stores everything about a software project except the code. Call `specline_context` first to orient. Pass the `session_id` your host gave you on every call, so writes are attributed to this conversation. Before creating a project, call `specline_projects` and confirm with the human.",
   "protocolVersions": [
+    "[date]",
+    "[date]",
     "[date]",
     "[date]"
   ],
