@@ -374,6 +374,29 @@ export interface Note {
   archived_at: string | null;
 }
 
+/**
+ * Which editor drove a conversation.
+ *
+ * `surface` on a row says what *kind* of place wrote it and there are five;
+ * this says which product, which is the difference between "code" and "Codex
+ * 0.148". Resolved through `session_id`, which every task, note and revision
+ * already carries.
+ *
+ * **`last_wrote`, and never "connected".** MCP over HTTP is stateless, so there
+ * is nothing connected to report — a dot rendered from this would be wrong for
+ * an editor quit an hour ago and wrong again for one sitting idle mid-thought.
+ * A session absent from this list is unknown, not offline.
+ */
+export interface SessionClient {
+  session_id: string;
+  name: string;
+  title: string | null;
+  version: string | null;
+  display_name: string;
+  first_seen: string;
+  last_wrote: string;
+}
+
 export interface Page<T> {
   items: T[];
   total: number;
@@ -633,6 +656,17 @@ export const api = {
    */
   notes: (project?: string) =>
     get<{ notes: Note[]; total: number }>("/api/notes", { project }),
+
+  /**
+   * Which editors have written, most recently first.
+   *
+   * Fetched whole rather than per row, for the same reason `notes` is: a screen
+   * showing thirty notes from six conversations wants one request and a lookup,
+   * not thirty. The table holds one row per conversation, so it stays small
+   * enough for that to be the cheaper shape.
+   */
+  clients: () =>
+    get<{ clients: SessionClient[]; total: number }>("/api/clients"),
 
   /**
    * How many notes each row in a project carries, and nothing else.

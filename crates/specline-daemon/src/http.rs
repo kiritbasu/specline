@@ -150,6 +150,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/entities", get(api_entities))
         .route("/api/inbox", get(api_inbox))
         .route("/api/notes", get(api_notes))
+        .route("/api/clients", get(api_clients))
         .route("/api/document/{id}", get(api_document))
         .route("/api/graph/{id}", get(api_graph))
         .route("/api/events", get(api_events_stream))
@@ -2161,6 +2162,74 @@ async fn api_entity(
             client: None,
         },
     ))
+}
+
+/// Which editor drove a conversation (KEEL-361).
+///
+/// Two questions off one table, because they are the same question read in two
+/// directions. `?session_id=` resolves one row's origin — every task, note and
+/// revision already carries the session that wrote it, so this is the join that
+/// turns that id into "Codex 0.148". No argument lists the sessions that have
+/// written, most recently first, which is "what is talking to Specline".
+///
+/// **`last_wrote`, not `connected`, and the field name is the point.** MCP over
+/// HTTP is stateless: there is no connection to report, so a caller rendering a
+/// green light would be inventing one — wrong for an editor quit an hour ago,
+/// and wrong again for one sitting idle mid-conversation. A name for this field
+/// that implied liveness would be a lie told once in the daemon and repeated by
+/// every surface that read it.
+///
+/// A session with no row is absent rather than defaulted. Three different
+/// things land there — a conversation older than the table, a transport that
+/// named no client, and one that never wrote — and all three are honestly
+/// unknown.
+async fn api_clients(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    use specline_core::EntityStore;
+
+    let store = state.store();
+    let found = match params.get("session_id") {
+        Some(session_id) => store
+            .client_for_session(session_id)
+            .map(|one| one.into_iter().collect::<Vec<_>>()),
+        None => {
+            // Ordered by last write, so a limit keeps what somebody is most
+            // likely to be looking at rather than an arbitrary slice.
+            let limit = params
+                .get("limit")
+                .and_then(|l| l.parse::<usize>().ok())
+                .unwrap_or(200)
+                .clamp(1, 1000);
+            store.session_clients(limit)
+        }
+    };
+
+    match found {
+        Ok(clients) => {
+            let rows: Vec<Value> = clients
+                .iter()
+                .map(|c| {
+                    json!({
+                        "session_id": c.session_id,
+                        "name": c.client.name,
+                        "title": c.client.title,
+                        "version": c.client.version,
+                        "display_name": c.client.display_name(),
+                        "first_seen": c.first_seen,
+                        "last_wrote": c.last_seen,
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(json!({ "data": { "clients": rows, "total": rows.len() } })),
+            )
+                .into_response()
+        }
+        Err(e) => internal_error(&e.to_string()),
+    }
 }
 
 /// A row's running commentary.

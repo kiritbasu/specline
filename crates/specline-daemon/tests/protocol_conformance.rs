@@ -408,3 +408,84 @@ async fn a_write_records_the_editor_that_made_it() {
     assert_eq!(recorded.client.name, "codex-mcp-client");
     assert_eq!(recorded.client.version.as_deref(), Some("0.148.0-alpha.15"));
 }
+
+/// The endpoint that turns a session id into "which editor was that".
+///
+/// Written through the daemon because the whole chain is only real here: the
+/// `User-Agent` on a write, the row it creates, and the read that joins them
+/// back up. Two directions off one table — one session resolved, and the list
+/// of everything that has written.
+#[tokio::test]
+async fn the_clients_endpoint_answers_in_both_directions() {
+    let (base, _dir) = daemon().await;
+
+    for (session, agent) in [
+        ("ses_one", "claude-code/2.1.185"),
+        ("ses_two", "codex-mcp-client/0.148.0-alpha.15"),
+    ] {
+        let (status, body) = post(
+            &base,
+            &[("user-agent", agent)],
+            rpc(
+                "tools/call",
+                json!({
+                    "name": "specline_create",
+                    "arguments": {
+                        "type": "project",
+                        "title": format!("From {session}"),
+                        "slug": session.replace('_', "-"),
+                        "session_id": session,
+                        "surface": "code"
+                    }
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+    }
+
+    let client = reqwest::Client::new();
+
+    // One session, resolved.
+    let one: Value = client
+        .get(format!("{base}/api/clients?session_id=ses_two"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(one["data"]["total"], 1, "{one}");
+    assert_eq!(one["data"]["clients"][0]["name"], "codex-mcp-client");
+    assert_eq!(one["data"]["clients"][0]["version"], "0.148.0-alpha.15");
+    assert!(
+        one["data"]["clients"][0]["last_wrote"].is_string(),
+        "the field says what it means — a write, not a connection: {one}"
+    );
+
+    // Everything that has written, most recent first.
+    let all: Value = client
+        .get(format!("{base}/api/clients"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(all["data"]["total"], 2, "{all}");
+    assert_eq!(
+        all["data"]["clients"][0]["session_id"], "ses_two",
+        "most recently written first: {all}"
+    );
+
+    // A session nobody has heard of is absent, not guessed at.
+    let unknown: Value = client
+        .get(format!("{base}/api/clients?session_id=ses_never"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unknown["data"]["total"], 0, "{unknown}");
+}

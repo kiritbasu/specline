@@ -8,7 +8,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 
 const TASK = {
   id: "tsk_me",
@@ -37,6 +44,9 @@ const TASK = {
 };
 
 const updateTask = vi.fn(async () => TASK);
+
+/// Flipped by the test that proves a screen survives losing this one request.
+let clientsUnavailable = false;
 
 vi.mock("../lib/api", () => ({
   ApiError: class ApiError extends Error {
@@ -143,11 +153,35 @@ vi.mock("../lib/api", () => ({
     entities: async ({ type }: { type?: string }) => ({
       items:
         type === "milestone"
-          ? [{ id: "mst_1", type: "milestone", name: "Phase 6 — Make the tracker real" }]
+          ? [
+              {
+                id: "mst_1",
+                type: "milestone",
+                name: "Phase 6 — Make the tracker real",
+              },
+            ]
           : [
-              { id: "tsk_first", type: "task", title: "Aaa first", status: "todo", priority: "p0" },
-              { id: "tsk_me", type: "task", title: "Me", status: "in_progress", priority: "p0" },
-              { id: "tsk_last", type: "task", title: "Zzz last", status: "done", priority: "p0" },
+              {
+                id: "tsk_first",
+                type: "task",
+                title: "Aaa first",
+                status: "todo",
+                priority: "p0",
+              },
+              {
+                id: "tsk_me",
+                type: "task",
+                title: "Me",
+                status: "in_progress",
+                priority: "p0",
+              },
+              {
+                id: "tsk_last",
+                type: "task",
+                title: "Zzz last",
+                status: "done",
+                priority: "p0",
+              },
               {
                 id: "tsk_parent",
                 type: "task",
@@ -176,6 +210,25 @@ vi.mock("../lib/api", () => ({
       truncated: false,
     }),
     context: async () => ({ next_up: null }),
+    // `ses_abc` wrote the first note; `ses_nobody` is here to prove a session
+    // this list does not know stays silent rather than reading as anything.
+    clients: async () => {
+      if (clientsUnavailable) throw new Error("404 — an older daemon");
+      return {
+        clients: [
+          {
+            session_id: "ses_abc",
+            name: "codex-mcp-client",
+            title: "Codex",
+            version: "0.148.0-alpha.15",
+            display_name: "Codex",
+            first_seen: "2026-08-10T09:00:00Z",
+            last_wrote: "2026-08-10T09:30:00Z",
+          },
+        ],
+        total: 1,
+      };
+    },
     updateTask,
   },
 }));
@@ -184,7 +237,12 @@ const { TaskScreen } = await import("./Task");
 // The mocked class, which is the one the component compares against.
 const { ApiError } = await import("../lib/api");
 
-const route = { screen: "task" as const, project: "specline", taskId: "tsk_me", query: {} };
+const route = {
+  screen: "task" as const,
+  project: "specline",
+  taskId: "tsk_me",
+  query: {},
+};
 
 async function show() {
   render(<TaskScreen route={route} generation={0} />);
@@ -201,7 +259,9 @@ afterEach(cleanup);
 describe("what it shows", () => {
   it("renders the description, the properties and the milestone by name", async () => {
     await show();
-    expect(screen.getByText("Clicking a card opens the task at its own URL.")).toBeTruthy();
+    expect(
+      screen.getByText("Clicking a card opens the task at its own URL."),
+    ).toBeTruthy();
     expect(screen.getByText("Phase 6 — Make the tracker real")).toBeTruthy();
     expect(screen.getAllByText("in_progress").length).toBeGreaterThan(0);
   });
@@ -220,7 +280,9 @@ describe("what it shows", () => {
   it("links a related task to its own page", async () => {
     await show();
     const link = screen.getByText("Sub-tasks — a parent link").closest("a");
-    expect(link?.getAttribute("href")).toBe("#/projects/specline/tasks/tsk_child");
+    expect(link?.getAttribute("href")).toBe(
+      "#/projects/specline/tasks/tsk_child",
+    );
   });
 
   // A retracted note stays visible and struck through. Hiding it would rewrite
@@ -238,11 +300,52 @@ describe("what it shows", () => {
     expect(screen.getByText("written outside a tracked session")).toBeTruthy();
   });
 
+  it("names the editor a note was written from", async () => {
+    await show();
+    // `surface` on this note is `code`, which Claude Code and Codex both write.
+    // The version is what distinguishes them, so it has to be on screen.
+    expect(screen.getByText(/Codex 0\.148\.0-alpha\.15/)).toBeTruthy();
+  });
+
+  // Unknown has to look like nothing, not like a word.
+  //
+  // Every row written before this was recorded resolves to no client, and a
+  // screen that says "unknown" thirty times says nothing else. The session id
+  // is still rendered for anyone who needs to chase it.
+  it("says nothing at all for a session whose editor is unrecorded", async () => {
+    await show();
+    expect(screen.queryByText(/unknown/i)).toBeNull();
+    // The note with no session keeps its own honest sentence.
+    expect(screen.getByText("written outside a tracked session")).toBeTruthy();
+  });
+
+  // A label must not be able to take the page down with it.
+  //
+  // The first version of this fetched the editors inside the same
+  // `Promise.all` as the task, its notes and its history, which made any
+  // rejection the whole screen's — and an app talking to a daemon older than
+  // the endpoint is the ordinary way that happens, not an exotic one. The page
+  // renders; the editor names are simply absent.
+  it("still renders the task when the editors cannot be fetched", async () => {
+    clientsUnavailable = true;
+    try {
+      await show();
+      expect(
+        screen.getByText("Clicking a card opens the task at its own URL."),
+      ).toBeTruthy();
+      expect(screen.queryByText(/Codex/)).toBeNull();
+    } finally {
+      clientsUnavailable = false;
+    }
+  });
+
   // The event log has always held before and after; nothing had ever shown it.
   it("renders a field change as before and after", async () => {
     await show();
     // Scoped to the History card — "todo" also names several sub-task statuses.
-    const history = screen.getByText("History").closest("section") as HTMLElement;
+    const history = screen
+      .getByText("History")
+      .closest("section") as HTMLElement;
     const row = within(history).getByText("todo").closest("li");
     expect(row?.textContent).toContain("status");
     expect(row?.textContent).toContain("todo");
@@ -273,7 +376,9 @@ describe("the description, whichever field carries it", () => {
     TASK.body = null;
     TASK.summary = "The board never says which phase a task belongs to.";
     await show();
-    expect(screen.getByText("The board never says which phase a task belongs to.")).toBeTruthy();
+    expect(
+      screen.getByText("The board never says which phase a task belongs to."),
+    ).toBeTruthy();
     expect(screen.queryByText("No description.")).toBeNull();
   });
 
@@ -290,7 +395,9 @@ describe("the description, whichever field carries it", () => {
   it("prefers the body when both are there, and does not label it", async () => {
     TASK.summary = "One sentence that must not win.";
     await show();
-    expect(screen.getByText("Clicking a card opens the task at its own URL.")).toBeTruthy();
+    expect(
+      screen.getByText("Clicking a card opens the task at its own URL."),
+    ).toBeTruthy();
     expect(screen.queryByText("One sentence that must not win.")).toBeNull();
     expect(screen.queryByText("from the summary")).toBeNull();
   });
@@ -377,9 +484,9 @@ describe("what this is part of", () => {
 
   it("links a sub-task to its own page", async () => {
     await show();
-    expect(screen.getByText("A finished piece").closest("a")?.getAttribute("href")).toBe(
-      "#/projects/specline/tasks/tsk_kid_a",
-    );
+    expect(
+      screen.getByText("A finished piece").closest("a")?.getAttribute("href"),
+    ).toBe("#/projects/specline/tasks/tsk_kid_a");
   });
 
   it("shows every external link, not just the first", async () => {
@@ -396,9 +503,15 @@ describe("the ask-Claude prompts", () => {
     await show();
     // Matching on the button's accessible name: the prompt is a bare text node
     // beside the "copy" affordance, so it is not an element of its own.
-    expect(screen.getByRole("button", { name: /close .+ as done with the commit/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /what is blocking/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /split .+ into sub-tasks/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /close .+ as done with the commit/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /what is blocking/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /split .+ into sub-tasks/ }),
+    ).toBeTruthy();
   });
 
   it("copies one to the clipboard", async () => {
@@ -563,17 +676,17 @@ describe("while a change is saving", () => {
     });
 
     for (const field of ["Status", "Priority", "Kind", "Milestone"]) {
-      expect(
-        (screen.getByLabelText(field) as HTMLSelectElement).disabled,
-      ).toBe(true);
+      expect((screen.getByLabelText(field) as HTMLSelectElement).disabled).toBe(
+        true,
+      );
     }
 
     await act(async () => {
       release?.();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(
-      (screen.getByLabelText("Kind") as HTMLSelectElement).disabled,
-    ).toBe(false);
+    expect((screen.getByLabelText("Kind") as HTMLSelectElement).disabled).toBe(
+      false,
+    );
   });
 });

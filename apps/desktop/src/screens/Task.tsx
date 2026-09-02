@@ -18,6 +18,7 @@ import {
   type Neighbour,
   type Note,
   type Page as PageOf,
+  type SessionClient,
 } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { ApiError } from "../lib/api";
@@ -58,20 +59,32 @@ export function TaskScreen({
   const project = route.project;
   const id = route.taskId;
 
-  // Five requests, deliberately not folded into one. Each answers a different
+  // Six requests, deliberately not folded into one. Each answers a different
   // question of a different part of the store, and the daemon is on localhost
   // — the alternative is an endpoint that exists only to serve this screen and
   // has to change every time the screen does.
   const core = useAsync(async () => {
     if (!id) return null;
-    const [entity, notes, history, outbound, inbound] = await Promise.all([
-      api.entity(id),
-      api.notesFor(id),
-      api.history(id),
-      api.graph(id, "outbound", 1),
-      api.graph(id, "inbound", 1),
-    ]);
-    return { entity, notes, history, outbound, inbound };
+    const [entity, notes, history, outbound, inbound, clients] =
+      await Promise.all([
+        api.entity(id),
+        api.notesFor(id),
+        api.history(id),
+        api.graph(id, "outbound", 1),
+        api.graph(id, "inbound", 1),
+        // Which editor wrote each note. One request for the screen rather than
+        // one per note, and a lookup by session id afterwards.
+        //
+        // Its failure is swallowed, and that is deliberate rather than lazy.
+        // Everything else here is the page; this is a label on part of it, and
+        // a `Promise.all` makes any rejection the whole screen's. A daemon
+        // older than this endpoint — the ordinary state of an app updated
+        // before the binary under it — would blank the task page to avoid
+        // naming an editor. Falling back to none collapses into the state the
+        // display already handles: unknown, and so nothing shown.
+        api.clients().catch(() => ({ clients: [], total: 0 })),
+      ]);
+    return { entity, notes, history, outbound, inbound, clients };
   }, [id, generation]);
 
   // The siblings, so J and K walk the board's own order, and the milestones, so
@@ -303,6 +316,7 @@ export function TaskScreen({
               that looks like a broken button. */}
           <NoteStream
             notes={core.data?.notes.notes ?? []}
+            clients={core.data?.clients.clients ?? []}
             entityId={task ? String(task.id) : undefined}
             onAdded={core.reload}
           />
@@ -927,15 +941,46 @@ function NoteComposer({
   );
 }
 
+/**
+ * Which editor wrote something, when that is known.
+ *
+ * Renders nothing at all when it is not. The alternative is a word like
+ * "unknown" beside every row written before this was recorded, which is
+ * accurate and reads as breakage — a screen that says it does not know
+ * thirty times says nothing else. The absence is the honest display, and the
+ * session id is still there for anyone who needs to chase it.
+ *
+ * Never a live indicator. What is known is that this conversation wrote from
+ * this editor, not that the editor is running now.
+ */
+function Editor({ client }: { client: SessionClient | undefined }) {
+  if (!client) return null;
+  return (
+    <Tooltip align="left" text="The editor this conversation was driven from">
+      <span className="text-ink-muted">
+        {client.display_name}
+        {client.version ? ` ${client.version}` : ""}
+      </span>
+    </Tooltip>
+  );
+}
+
 function NoteStream({
   notes,
+  clients,
   entityId,
   onAdded,
 }: {
   notes: Note[];
+  clients: SessionClient[];
   entityId: string | undefined;
   onAdded: () => void;
 }) {
+  // Session id to editor, built once for the stream rather than searched per
+  // note. A session missing from here is unknown rather than absent-and-so-
+  // Claude Code: nothing wrote a client for it, and guessing which editor that
+  // was is the one thing this display must not do.
+  const editors = new Map(clients.map((c) => [c.session_id, c]));
   const composer = entityId ? (
     <NoteComposer entityId={entityId} onAdded={onAdded} />
   ) : null;
@@ -972,9 +1017,15 @@ function NoteStream({
                 </span>
                 <span>{when(note.created_at)}</span>
                 {note.session_id ? (
-                  <Tooltip align="left" text="The conversation that wrote this">
-                    <span className="font-mono">{note.session_id}</span>
-                  </Tooltip>
+                  <>
+                    <Tooltip
+                      align="left"
+                      text="The conversation that wrote this"
+                    >
+                      <span className="font-mono">{note.session_id}</span>
+                    </Tooltip>
+                    <Editor client={editors.get(note.session_id)} />
+                  </>
                 ) : (
                   <span>written outside a tracked session</span>
                 )}
