@@ -2,8 +2,9 @@
 
 Specline stores everything about a software project except the code: the specs,
 the decisions, the tasks, the open questions, the feedback. It runs on your
-machine. Claude reads and writes it through [MCP](https://modelcontextprotocol.io)
-while you work, and an app shows you what is in there.
+machine. Claude Code and Codex read and write it through
+[MCP](https://modelcontextprotocol.io) while you work, and an app shows you what
+is in there.
 
 ---
 
@@ -59,8 +60,15 @@ away tomorrow you would still have the files.
 
 ## Install
 
-You need [Claude Code](https://claude.com/claude-code). You do not need Rust,
-and there is nothing to edit by hand.
+Specline runs as one local daemon that every client talks to over HTTP, so
+installing it is two jobs: get the daemon running, then tell your editor where
+it is. [Claude Code](https://claude.com/claude-code) does both in three
+commands. [Codex](https://developers.openai.com/codex) does the first the same
+way and the second by hand.
+
+### Claude Code
+
+You do not need Rust, and there is nothing to edit by hand.
 
 Run these three inside Claude Code:
 
@@ -97,6 +105,97 @@ To check on it at any point:
 ```bash
 specline doctor
 ```
+
+### Codex
+
+Codex has no plugin to install, so the three things the plugin does — get the
+daemon running, register the MCP server, install the hooks — are three separate
+steps here. None of them needs Claude Code.
+
+**1. Get the daemon running.** The setup script is the same one
+`/specline:setup` runs, and it does not know or care which editor you use.
+
+```bash
+git clone https://github.com/kiritbasu/specline.git
+```
+
+```bash
+./specline/plugin/scripts/setup.sh
+```
+
+The clone is only how you get the script; it downloads the released binaries
+rather than building them, so you do not need Rust for this either.
+
+Skip both if Specline is already installed — one daemon serves every client, and
+a second one would only fight the first for the store.
+
+**2. Point Codex at it.**
+
+```bash
+codex mcp add specline --url http://127.0.0.1:7654/mcp
+```
+
+No token, no headers. The daemon binds `127.0.0.1` only, and refuses any request
+carrying an `Origin` that is not this machine — which is a browser and never a
+local client, since a local client sends none.
+
+Older Codex builds only understood servers launched as a subprocess. If yours
+rejects `--url`, add `experimental_use_rmcp_client = true` under `[features]` in
+`~/.codex/config.toml`, or upgrade — `codex mcp add --help` says whether `--url`
+is there.
+
+**3. Install the hooks.** This is the step that matters most, and the one with
+no equivalent command, so it goes in `~/.codex/config.toml` by hand:
+
+```toml
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "/Users/you/.cargo/bin/specline hook session-start"
+timeout = 15
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "/Users/you/.cargo/bin/specline hook stop"
+timeout = 20
+```
+
+Write the path out in full rather than using `~`. TOML does not expand it, and
+whether the runner does before executing is not something to find out by having
+a hook quietly do nothing. `command -v specline` prints the path to paste.
+
+**4. Trust them.** Run `/hooks` inside Codex and approve the two entries.
+
+Do not skip this, and do not assume it worked. Codex records a hash of each hook
+and **silently skips any it has not been shown** — no error, no warning, exactly
+the same as having configured nothing. If Specline seems installed but sessions
+start with no project summary, this is almost always why. Changing a hook's
+command later invalidates the trust and needs `/hooks` again.
+
+Then restart Codex. MCP servers connect at startup, so the tools will not appear
+in the session you set this up from.
+
+**5. Check it.** `specline doctor` from a terminal says whether the daemon is
+up and what it is serving. Inside Codex, ask it to call `specline_context` — if
+the tools are connected it will answer with the project, and if they are not it
+will say the tool is unavailable rather than guessing.
+
+### Running both at once
+
+You can. One daemon holds the store and every client is an HTTP client of it, so
+there is never a second writer — that is the same arrangement two Claude Code
+windows already use, and it is tested with sixteen concurrent sessions rather
+than two.
+
+Two consequences worth knowing. Claims are real across editors: if a Codex
+session has claimed a task, Claude Code is refused it and told which session
+holds it, which is the behaviour you want rather than a collision. And the
+daemon's rate limit is one budget shared by everything connected, generous
+enough that only a runaway loop reaches it.
 
 ### What leaves your machine
 
