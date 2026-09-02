@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.89"
 authors = ["KB"]
@@ -107,12 +107,12 @@ ureq = { version = "2", default-features = false, features = ["json", "tls"] }
 clap = { version = "4", features = ["derive"] }
 
 # Internal
-specline-core = { path = "crates/specline-core", version = "0.4.1" }
-specline-mcp = { path = "crates/specline-mcp", version = "0.4.1" }
-specline-embed = { path = "crates/specline-embed", version = "0.4.1" }
+specline-core = { path = "crates/specline-core", version = "0.5.0" }
+specline-mcp = { path = "crates/specline-mcp", version = "0.5.0" }
+specline-embed = { path = "crates/specline-embed", version = "0.5.0" }
 # Checking for and installing a newer release. Depended on by both shipped
 # binaries — see its own manifest for why it is not in `specline-core`.
-specline-update = { path = "crates/specline-update", version = "0.4.1" }
+specline-update = { path = "crates/specline-update", version = "0.5.0" }
 # A library from the `specline` package's point of view: it holds the daemon, and
 # the `specline-daemon` *binary* is a shim in `specline` so that one installer ships
 # both executables. See `crates/specline/Cargo.toml`.
@@ -121,7 +121,7 @@ specline-update = { path = "crates/specline-update", version = "0.4.1" }
 # features off. Only `specline` depends on this, and its own `embeddings` feature
 # forwards to the daemon's — so the ordinary build is unchanged and
 # `--no-default-features` reaches all the way down (KEEL-220).
-specline-daemon = { path = "crates/specline-daemon", version = "0.4.1", default-features = false }
+specline-daemon = { path = "crates/specline-daemon", version = "0.5.0", default-features = false }
 
 # Test-only
 insta = { version = "1", features = ["json", "redactions", "filters"] }

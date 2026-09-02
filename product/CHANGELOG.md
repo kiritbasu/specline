@@ -1,6 +1,6 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:34:28Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:50:09Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
@@ -1562,6 +1562,11 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T22:46:19.996825Z |
+| 2026-09-02 | claude | created task “Cut 0.5.0” |
+| 2026-09-02 | claude | created milestone “0.5.0” |
 | 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (86 characters) |
 | 2026-09-02 | claude | close_reason none → done |
@@ -1757,11 +1762,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | evidence [] → (120 characters) |
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (291 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T14:58:39.995682Z |
-| 2026-08-19 | claude | created task “Put the Inbox behind a flag, off by default, until the lifecycle is finished” |
-| 2026-08-19 | claude | status todo → done |
 
-*Showing the 200 most recent of 2718 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2723 changes. Use `specline_activity` for the rest.*
 
