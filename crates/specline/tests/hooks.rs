@@ -98,6 +98,32 @@ fn scratch() -> tempfile::TempDir {
     tempfile::tempdir().expect("a temporary directory")
 }
 
+/// The context a `SessionStart` hook injected, checking the envelope around it.
+///
+/// Five tests read the same two fields out of the same shape, and doing it by
+/// hand left four lines of plumbing above the one assertion each of them was
+/// actually making. The plumbing had drifted too — three spellings of the same
+/// `expect` between them, one of which said only "additionalContext is a
+/// string" and so reported nothing about what was there instead.
+///
+/// The `hookEventName` check moves in here rather than staying in the one test
+/// that made it. It is the field that tells Claude Code where the payload
+/// belongs, so it is worth asserting everywhere a payload is read rather than
+/// once.
+fn injected_context(stdout: &str) -> String {
+    let parsed: serde_json::Value = serde_json::from_str(stdout)
+        .unwrap_or_else(|e| panic!("a hook must print valid JSON, got {stdout:?}: {e}"));
+    let output = &parsed["hookSpecificOutput"];
+    assert_eq!(
+        output["hookEventName"], "SessionStart",
+        "the event name is what tells Claude Code where this belongs: {parsed}"
+    );
+    output["additionalContext"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no additionalContext to read: {parsed}"))
+        .to_owned()
+}
+
 const MATCHED: &str = r#"{"summary":"Specline (specline)\nstatus: active\n\n## Next\n- do the thing","data":{"project":{"slug":"specline"}}}"#;
 const UNMATCHED: &str = r#"{"summary":"specline_context matched nothing for this checkout\n\nAcme Corp\n\nWidgets Ltd","data":{"project":null}}"#;
 const NO_EVENTS: &str = r#"{"data":{"events":[]}}"#;
@@ -118,16 +144,9 @@ fn session_start_injects_the_digest_and_pins_the_session_id() {
     );
 
     assert_eq!(code, 0);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON on stdout");
-    let context = parsed["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .expect("additionalContext is a string");
+    let context = injected_context(&stdout);
     assert!(context.contains("do the thing"), "{context}");
     assert!(context.contains("ses_abc123"), "{context}");
-    assert_eq!(
-        parsed["hookSpecificOutput"]["hookEventName"], "SessionStart",
-        "the event name is what tells Claude Code where this belongs"
-    );
 }
 
 /// A compaction is not a session start, and re-injecting there spends the most
@@ -161,10 +180,7 @@ fn session_start_in_an_unknown_directory_injects_one_paragraph() {
         dir.path(),
     );
 
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let context = parsed["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap();
+    let context = injected_context(&stdout);
     assert!(context.contains("matched nothing"), "{context}");
     assert!(
         !context.contains("Acme Corp"),
@@ -197,10 +213,7 @@ fn session_start_says_the_daemon_is_down_rather_than_saying_nothing() {
 
     assert_eq!(code, 0, "a hook must never fail a session start");
 
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON on stdout");
-    let context = parsed["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .expect("additionalContext is a string");
+    let context = injected_context(&stdout);
 
     assert!(
         context.contains("is not running"),
@@ -231,10 +244,7 @@ fn session_start_separates_a_broken_daemon_from_a_missing_one() {
     );
 
     assert_eq!(code, 0);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON on stdout");
-    let context = parsed["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .expect("additionalContext is a string");
+    let context = injected_context(&stdout);
 
     assert!(context.contains("Something is listening"), "{context}");
     assert!(
@@ -528,10 +538,7 @@ fn the_shim_reports_a_missing_binary_at_session_start() {
     );
 
     assert_eq!(code, 0);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-    let context = parsed["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap();
+    let context = injected_context(&stdout);
     assert!(context.contains("/specline:setup"), "{context}");
 }
 
