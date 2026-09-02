@@ -114,16 +114,6 @@ pub enum Era {
     Legacy,
 }
 
-impl Era {
-    /// The version string to echo back.
-    pub const fn version(self) -> &'static str {
-        match self {
-            Era::Modern => PROTOCOL_VERSION,
-            Era::Legacy => LEGACY_PROTOCOL_VERSION,
-        }
-    }
-}
-
 /// `_meta` key carrying the protocol version.
 pub const META_PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 /// `_meta` key carrying client identity.
@@ -166,6 +156,18 @@ pub mod codes {
     /// The client did not declare a capability the server needs.
     pub const MISSING_REQUIRED_CLIENT_CAPABILITY: i32 = -32021;
     /// The requested protocol version is not served.
+    ///
+    /// **Nothing raises this, and that is the point.** It had one producer —
+    /// the arm of `check_headers` that refused an unrecognised revision — and
+    /// that arm was the bug KEEL-355 removed: Codex opens with 2025-06-18, was
+    /// told the server spoke two other revisions, and never saw a tool. A
+    /// version is negotiated in the answer now, so there is nothing left to
+    /// refuse.
+    ///
+    /// Kept rather than deleted because it is the specification's number for
+    /// this condition, not Specline's, and `http_status` should map it if a
+    /// reason to send it ever appears. Anyone grepping for `-32022` and finding
+    /// no producer is reading it right.
     pub const UNSUPPORTED_PROTOCOL_VERSION: i32 = -32022;
     /// Specline's own: an update lost an optimistic-concurrency race. Inside the
     /// implementation-defined range, which is where a server's own errors
