@@ -67,7 +67,7 @@ sha2 = "0.11"
 # The daemon's per-request secret comes from the operating system, not from a
 # clock or a counter (KEEL-238).
 rand = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 # `default-features = false`, and the two features named back are the two
 # defaults that are not an image pipeline. `image-models` is on by default and
 # pulls `image`, which pulls `ravif`, which pulls `rav1e` — an AV1 *encoder*, in
