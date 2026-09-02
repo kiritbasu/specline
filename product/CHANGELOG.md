@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:33:07Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:49:31Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (324)
+## Closed work (325)
 
 ### 2026-09-02
+
+- **KEEL-368** Cut 0.5.1 — `done`
+
+  0.5.1 is out, published at 23:48:38Z with all four release jobs green.
+  
+  The thing this release existed to prove was checked rather than assumed: `specline-uninstall.sh` is attached as an asset, its digest is in `specline-release.json` alongside the installer's, the README's `releases/latest/download/` URL resolves, and what comes back is byte-identical to the repository's copy and still parses under dash.
+  
+  CI was green on main before the tag existed, same order as 0.5.0.
+
+  <sub>commit:1a15657 · url:https://github.com/kiritbasu/specline/releases/tag/v0.5.1</sub>
 
 - **KEEL-367** Uninstalling is nine commands typed by hand, and should be a script — `done`
 
@@ -1596,6 +1606,12 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (82 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (475 characters) |
+| 2026-09-02 | claude | status open → shipped |
+| 2026-09-02 | claude | shipped_at none → 2026-09-02T23:48:38Z |
 | 2026-09-02 | claude | status todo → in_progress |
 | 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
 | 2026-09-02 | claude | claimed_at none → 2026-09-02T23:28:41.939329Z |
@@ -1790,12 +1806,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → (126 characters) |
 | 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (381 characters) |
-| 2026-08-19 | claude | created task “Teach the skill the feature-request lifecycle, once the flag flips” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T16:33:41.853794Z |
-| 2026-08-19 | claude | status in_progress → done |
 
-*Showing the 200 most recent of 2750 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2756 changes. Use `specline_activity` for the rest.*
 
