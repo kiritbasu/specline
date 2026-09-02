@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T19:15:04Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:30:30Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (313)
+## Closed work (314)
 
 ### 2026-09-02
+
+- **KEEL-355** Codex cannot connect: the daemon refuses MCP 2025-06-18 instead of offering one it speaks — `done`
+
+  Codex connects. The daemon no longer refuses a revision it does not recognise — anything that is not the current one is read as legacy, and negotiation moved into what gets echoed back: a served revision comes back as itself, and only an unrecognised one gets a counter-offer.
+  
+  Verified live rather than in tests alone. Codex 0.148.0-alpha.15 asked for 2025-06-18, was answered 2025-06-18, sent notifications/initialized, listed the thirteen tools and ran specline_projects to completion — captured through the same logging proxy that caught the original failure. Run against a scratch store on its own port so the production daemon kept its lock throughout.
+  
+  Three tests that asserted the refusal now assert the service, and two new ones drive the exact initialize body captured from Codex, one at the unit level and one end to end through the daemon. Both clippy configurations and both suites clean: 1,276 tests with embeddings on, 1,275 without.
+
+  <sub>commit:d58a8c4 · test:cargo test --workspace · test:cargo test --workspace --exclude specline-embed --no-default-features</sub>
 
 - **KEEL-354** The session hook goes quiet when the daemon is down, instead of saying so — `done`
 
@@ -1475,6 +1485,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (125 characters) |
 | 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (949 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T20:08:02.130930Z |
+| 2026-09-02 | claude | created task “Codex cannot connect: the daemon refuses MCP 2025-06-18 instead of offering one it speaks” |
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (125 characters) |
+| 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (782 characters) |
 | 2026-09-02 | claude | status todo → in_progress |
 | 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
@@ -1664,14 +1682,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (268 characters) |
 | 2026-08-19 | claude | created milestone “0.4.0 — the Releases screen, and a roadmap that says where you are” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T12:45:21.200311Z |
-| 2026-08-19 | claude | created task “Cut 0.4.0 — the Releases screen, the roadmap that says where you are, and the Inbox” |
-| 2026-08-19 | claude | summary (74 characters) → (80 characters) |
-| 2026-08-19 | claude | status todo → done |
-| 2026-08-19 | claude | evidence [] → (134 characters) |
-| 2026-08-19 | claude | close_reason none → done |
 
-*Showing the 200 most recent of 2650 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2658 changes. Use `specline_activity` for the rest.*
 
