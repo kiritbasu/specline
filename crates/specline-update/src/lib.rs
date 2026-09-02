@@ -989,7 +989,7 @@ pub fn run(
                      {to}), so it is not applied automatically.\n\nA migration rewrites your \
                      store and cannot be undone — `specline update --rollback` puts the binaries \
                      back, not the data. Take it deliberately, with the daemon stopped:\n\n    \
-                     specline backup <dir>\n    # install {version} the way you installed Specline the \
+                     specline backup --dest <dir>\n    # install {version} the way you installed Specline the \
                      first time\n    specline migrate\n\nThere is no flag here that will do it for \
                      you. That is the point of this refusal, not a gap in it."
                 );

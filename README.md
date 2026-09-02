@@ -251,6 +251,73 @@ Turn it off at install time with `--no-update-check`, or afterwards with
 `SPECLINE_AUTO_UPDATE=0`. With it off, Specline makes no network requests at
 all.
 
+### Stopping and starting it
+
+**`kill` does not work, and that is deliberate.** The daemon runs under a
+service manager that restarts it — `KeepAlive` on macOS, `Restart` on Linux —
+so killing the process brings it straight back and reads as Specline ignoring
+you. Go through the service manager instead.
+
+```bash
+launchctl bootout gui/$(id -u)/sh.specline.daemon      # stop, macOS
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/sh.specline.daemon.plist
+```
+
+```bash
+systemctl --user stop specline.service                 # stop, Linux
+systemctl --user start specline.service
+```
+
+To restart in one step — after replacing the binaries, say — macOS has
+`launchctl kickstart -k gui/$(id -u)/sh.specline.daemon` and Linux has
+`systemctl --user restart specline.service`.
+
+Stopping the daemon does not stop Specline. The CLI opens the store directly
+when nothing is listening, so `specline status`, `search` and the rest keep
+working; what stops is the MCP surface your agent talks to, and the app.
+
+### Uninstalling
+
+There is no `specline uninstall`. Five things get installed and they come off
+in this order, the last one being the only one you cannot undo.
+
+**1. Stop the service and remove it.**
+
+```bash
+launchctl bootout gui/$(id -u)/sh.specline.daemon
+rm ~/Library/LaunchAgents/sh.specline.daemon.plist
+```
+
+On Linux: `systemctl --user disable --now specline.service` and
+`rm ~/.config/systemd/user/specline.service`.
+
+**2. Remove the binaries.**
+
+```bash
+rm ~/.cargo/bin/specline ~/.cargo/bin/specline-daemon
+```
+
+**3. Disconnect your editors.** In Claude Code, `/plugin uninstall specline`.
+In Codex, `codex mcp remove specline` and delete the two `[[hooks.*]]` blocks
+from `~/.codex/config.toml`.
+
+**4. Take a copy of the store, if there is any chance you want it.**
+
+```bash
+specline backup --dest ~/specline-final-backup
+```
+
+**5. Then, and only then, delete it.**
+
+```bash
+rm -rf ~/.specline
+```
+
+That directory is everything Specline has ever recorded — every decision, every
+question, every note, and the reasoning in them. It is the one part of this
+that no reinstall brings back, which is why it is last and why step 4 is not
+optional advice.
+
 ---
 
 ## Using it
