@@ -31,7 +31,15 @@
 # disk holds a copy. So it survives by default, and `--purge` backs it up
 # before removing it rather than trusting that somebody meant it.
 
-set -uo pipefail
+# `set -u` and no `pipefail`, deliberately. This is meant to be runnable as
+# `curl … | sh`, and `/bin/sh` is dash on Debian and Ubuntu, where
+# `set -o pipefail` is not an option and the script dies before doing
+# anything, with `Illegal option`. macOS hides that completely: its `/bin/sh`
+# is bash in POSIX mode and accepts it. No pipeline here has an exit status
+# worth checking, so
+# the option was decoration that only broke the platforms it was never tested
+# on. Everything below is POSIX; the bash shebang is for running it directly.
+set -u
 
 BIN_DIR="${SPECLINE_BIN_DIR:-${CARGO_HOME:-$HOME/.cargo}/bin}"
 SPECLINE_HOME_DIR="${SPECLINE_HOME:-$HOME/.specline}"
@@ -49,7 +57,7 @@ for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
         --purge)   PURGE=true ;;
-        -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)         echo "uninstall: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done

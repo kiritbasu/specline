@@ -281,11 +281,17 @@ working; what stops is the MCP surface your agent talks to, and the app.
 One command, the same way installing is:
 
 ```bash
-./plugin/scripts/uninstall.sh
+curl -fsSL https://github.com/kiritbasu/specline/releases/latest/download/specline-uninstall.sh | sh
 ```
 
 It stops the service through the service manager, removes it, and removes the
-two binaries. Add `--dry-run` first if you want to read what it would do.
+two binaries. It ships as a release asset with its checksum in
+`specline-release.json`, so you can download it, read it and check it before
+running it rather than piping it — which for a script whose job is deleting
+things is the version I would do.
+
+From a clone, it is `./plugin/scripts/uninstall.sh` and the same flags apply.
+Add `--dry-run` either way if you want to read what it would do first.
 
 **Your store is kept.** `~/.specline` holds every decision, question and note
 Specline has recorded, nothing else on disk has a copy, and reinstalling picks
@@ -293,7 +299,7 @@ it up again exactly where it was. Removing it is a separate decision and takes
 a separate flag:
 
 ```bash
-./plugin/scripts/uninstall.sh --purge
+curl -fsSL https://github.com/kiritbasu/specline/releases/latest/download/specline-uninstall.sh | sh -s -- --purge
 ```
 
 which backs the store up to your home directory before deleting it — with

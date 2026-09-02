@@ -420,12 +420,24 @@ jobs:
           list="$RUNNER_TEMP/release-files.txt"
           : > "$list"
 
+          # The uninstall script rides along, named to match the installer.
+          #
+          # `dist` does not know about it — it is ours, not a build artifact —
+          # so it is copied in here rather than produced. It has to be *in* the
+          # release because the alternative is the README telling people to run
+          # a path only a clone has, and most installs are a download. It lands
+          # in the manifest with everything else, so it can be checksum-checked
+          # before being run exactly like the installer can.
+          cp "$GITHUB_WORKSPACE/plugin/scripts/uninstall.sh" \
+             "$dir/specline-uninstall.sh"
+
           # `*.tar.*` rather than `*.tar.xz`, deliberately: `unix-archive` is
           # unset in `dist-workspace.toml`, so the extension is a default that
           # could move, and a fixed one here would silently stop uploading the
           # archives the day it did. The `.sha256` sidecars beside them are
           # what this filter is actually excluding.
-          for f in "$dir"/specline-installer.sh "$dir"/specline-release.json "$dir"/specline-*.tar.*; do
+          for f in "$dir"/specline-installer.sh "$dir"/specline-uninstall.sh \
+                   "$dir"/specline-release.json "$dir"/specline-*.tar.*; do
             [ -f "$f" ] || continue
             case "$f" in *.sha256) continue ;; esac
             printf '%s\n' "$f" >> "$list"
