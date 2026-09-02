@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:50:09Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:07:29Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (321)
+## Closed work (322)
 
 ### 2026-09-02
+
+- **KEEL-365** Cut 0.5.0 — `done`
+
+  0.5.0 is out. Thirty-two commits pushed, tagged, and published at 23:06:43Z with all four release jobs green — three platform builds plus the installer and attestations step.
+  
+  The order held: the release row was written before the tag, the tag carried its prose, and GitHub published those bytes rather than a list of commit subjects. Verified after the fact rather than assumed — the published body matches the tag, the manifest reports version 0.5.0 and schema 5, `min_plugin_version` is still 0.3.0, and all five assets are present for the three platforms.
+  
+  CI was green on main before the tag existed, which is the point of pushing the branch first: a failing build could not have become a published release.
+
+  <sub>commit:4d5eea7 · url:https://github.com/kiritbasu/specline/releases/tag/v0.5.0 · test:cargo test --workspace</sub>
 
 - **KEEL-363** A limit of usize::MAX means no limit, and the client list refetches per task — `done`
 
@@ -1562,6 +1572,12 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (112 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (712 characters) |
+| 2026-09-02 | claude | status open → shipped |
+| 2026-09-02 | claude | shipped_at none → 2026-09-02T23:06:43Z |
 | 2026-09-02 | claude | status todo → in_progress |
 | 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
 | 2026-09-02 | claude | claimed_at none → 2026-09-02T22:46:19.996825Z |
@@ -1756,12 +1772,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (265 characters) |
 | 2026-08-19 | claude | triaged false → true |
-| 2026-08-19 | claude | “The rail's `·1` markers read as unclear, and ⌘ was the…” informs “Take the shortcut keycaps out of the rail” |
-| 2026-08-19 | claude | created task “Take the shortcut keycaps out of the rail” |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (120 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (291 characters) |
 
-*Showing the 200 most recent of 2723 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2729 changes. Use `specline_activity` for the rest.*
 
