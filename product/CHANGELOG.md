@@ -1,15 +1,27 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:39:41Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:46:37Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (315)
+## Closed work (316)
 
 ### 2026-09-02
+
+- **KEEL-357** Tidy the duplication this session's two fixes left in their own code — `done`
+
+  Both consolidations landed and nothing changed behaviour: 1,276 and 1,275 tests before and after, with no test modified to keep it passing.
+  
+  `injected_context` replaces five hand-rolled extractions in hooks.rs, and takes the `hookEventName` assertion in with it — that check now runs at every site that reads a payload instead of at the one test that happened to make it. The failure messages improved on the way: the worst of the three said only "additionalContext is a string" and printed nothing about what was actually there.
+  
+  The two http.rs calls now use imported names like everything else in that file, which stopped one call site wrapping and collapsed the `initialize` arm from three lines to one.
+  
+  Two candidates were rejected rather than missed, and the reasoning is in the commit: `session_start`'s nested match reads better than the flatter guard-clause version, and building `SUPPORTED_VERSIONS` by indexing `LEGACY_VERSIONS` would trade readable strings for subscripts without closing the gap the drift test already covers.
+
+  <sub>commit:b5c1200 · test:cargo test --workspace · test:cargo test --workspace --exclude specline-embed --no-default-features</sub>
 
 - **KEEL-356** Clear the dead code the version-negotiation change left behind — `done`
 
@@ -1493,6 +1505,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (125 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (1039 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T20:46:11.175930Z |
+| 2026-09-02 | claude | created task “Tidy the duplication this session's two fixes left in their own code” |
+| 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (109 characters) |
 | 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (681 characters) |
@@ -1684,14 +1704,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_message none → (295 characters) |
 | 2026-08-19 | claude | revised feedback “A feature request needs somewhere to live that is not a task, and it should break into subtasks” to v1 |
 | 2026-08-19 | claude | created feedback “A feature request needs somewhere to live that is not a task, and it should break into subtasks” |
-| 2026-08-19 | claude | revised feedback “Open work piles up until it is too expensive to read, and nothing points that out” to v1 |
-| 2026-08-19 | claude | created feedback “Open work piles up until it is too expensive to read, and nothing points that out” |
-| 2026-08-19 | claude | revised feedback “Specline should work with OpenAI Codex, not only Claude Code” to v1 |
-| 2026-08-19 | claude | created feedback “Specline should work with OpenAI Codex, not only Claude Code” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T14:07:21.446938Z |
-| 2026-08-19 | claude | status in_progress → done |
 
-*Showing the 200 most recent of 2666 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2674 changes. Use `specline_activity` for the rest.*
 
