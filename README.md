@@ -278,45 +278,32 @@ working; what stops is the MCP surface your agent talks to, and the app.
 
 ### Uninstalling
 
-There is no `specline uninstall`. Five things get installed and they come off
-in this order, the last one being the only one you cannot undo.
-
-**1. Stop the service and remove it.**
+One command, the same way installing is:
 
 ```bash
-launchctl bootout gui/$(id -u)/sh.specline.daemon
-rm ~/Library/LaunchAgents/sh.specline.daemon.plist
+./plugin/scripts/uninstall.sh
 ```
 
-On Linux: `systemctl --user disable --now specline.service` and
-`rm ~/.config/systemd/user/specline.service`.
+It stops the service through the service manager, removes it, and removes the
+two binaries. Add `--dry-run` first if you want to read what it would do.
 
-**2. Remove the binaries.**
+**Your store is kept.** `~/.specline` holds every decision, question and note
+Specline has recorded, nothing else on disk has a copy, and reinstalling picks
+it up again exactly where it was. Removing it is a separate decision and takes
+a separate flag:
 
 ```bash
-rm ~/.cargo/bin/specline ~/.cargo/bin/specline-daemon
+./plugin/scripts/uninstall.sh --purge
 ```
 
-**3. Disconnect your editors.** In Claude Code, `/plugin uninstall specline`.
-In Codex, `codex mcp remove specline` and delete the two `[[hooks.*]]` blocks
-from `~/.codex/config.toml`.
+which backs the store up to your home directory before deleting it — with
+`specline backup` if the binary is still there, and a plain directory copy if it
+is not. It refuses to delete anything it could not first copy.
 
-**4. Take a copy of the store, if there is any chance you want it.**
-
-```bash
-specline backup --dest ~/specline-final-backup
-```
-
-**5. Then, and only then, delete it.**
-
-```bash
-rm -rf ~/.specline
-```
-
-That directory is everything Specline has ever recorded — every decision, every
-question, every note, and the reasoning in them. It is the one part of this
-that no reinstall brings back, which is why it is last and why step 4 is not
-optional advice.
+**Two things it leaves alone**, because they are yours rather than Specline's,
+and it prints them rather than editing your files: `/plugin uninstall specline`
+in Claude Code, and `codex mcp remove specline` plus deleting the two
+`[[hooks.*]]` blocks from `~/.codex/config.toml` in Codex.
 
 ---
 
