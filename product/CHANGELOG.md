@@ -1,15 +1,27 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:22:30Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T22:34:28Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (320)
+## Closed work (321)
 
 ### 2026-09-02
+
+- **KEEL-363** A limit of usize::MAX means no limit, and the client list refetches per task — `done`
+
+  Both addressed, though only one of them turned out to be a bug.
+  
+  The client list is its own `useAsync` keyed on the generation, so walking a board no longer refetches two hundred rows per keypress — and that also retired the hand-written `catch` from the previous commit, because a separate hook already isolates a rejection. Same behaviour, one less thing to keep in step.
+  
+  `session_clients` saturates instead of casting, but on a smaller argument than the review made: `usize::MAX as i64` is -1, SQLite reads a negative LIMIT as unbounded, and that returns the same rows as `i64::MAX` does. There was no observable difference. `try_from` stays because it says the intent rather than arriving at it by a wrap that happens to land right, and the test says what it actually proves. The correction is on the note.
+  
+  Rust 1,293 and 1,292, the app 385, both clippy configurations clean.
+
+  <sub>commit:2ab4c2c · test:cargo test --workspace · test:npm test --prefix apps/desktop</sub>
 
 - **KEEL-362** Tidy the clients endpoint after the fact — `done`
 
@@ -1553,6 +1565,15 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (86 characters) |
 | 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (881 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T22:26:43.693851Z |
+| 2026-09-02 | claude | created task “A task's own row does not say which editor wrote it, only its notes do” |
+| 2026-09-02 | claude | created task “A limit of usize::MAX means no limit, and the client list refetches per task” |
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (86 characters) |
+| 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (980 characters) |
 | 2026-09-02 | claude | status todo → in_progress |
 | 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
@@ -1741,15 +1762,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T14:58:39.995682Z |
 | 2026-08-19 | claude | created task “Put the Inbox behind a flag, off by default, until the lifecycle is finished” |
 | 2026-08-19 | claude | status todo → done |
-| 2026-08-19 | claude | evidence [] → (100 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (423 characters) |
-| 2026-08-19 | claude | “Closing is what you do to anything that is dealt with, not…” resolves “How does triage reach MCP without a fourteenth tool?” |
-| 2026-08-19 | claude | status proposed → accepted |
-| 2026-08-19 | claude | revised decision “Closing is what you do to anything that is dealt with, not only to a task” to v1 |
-| 2026-08-19 | claude | created decision “Closing is what you do to anything that is dealt with, not only to a task” |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → ["commit:f3dcc8a","test:cargo test -p specline-core --test inbox"] |
 
-*Showing the 200 most recent of 2709 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2718 changes. Use `specline_activity` for the rest.*
 
