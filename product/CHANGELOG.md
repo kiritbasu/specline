@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:30:30Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:39:41Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (314)
+## Closed work (315)
 
 ### 2026-09-02
+
+- **KEEL-356** Clear the dead code the version-negotiation change left behind — `done`
+
+  `Era::version()` is gone — it had no call sites once `initialize_result` started taking the version rather than the era. `Era` stays, because the response envelope still branches on it.
+  
+  `codes::UNSUPPORTED_PROTOCOL_VERSION` stays too, and now says why nothing raises it. It is the specification's number for the condition rather than Specline's, and `http_status` should map it if a reason to send it ever returns; what it was missing was the sentence explaining the gap between a constant, two tests, and no producer.
+  
+  Both clippy configurations and both suites clean, with the test counts unchanged at 1,276 and 1,275 — which is what removing something nothing called should do.
+
+  <sub>commit:61404b1 · test:cargo test --workspace · test:cargo clippy --workspace --all-targets -- -D warnings</sub>
 
 - **KEEL-355** Codex cannot connect: the daemon refuses MCP 2025-06-18 instead of offering one it speaks — `done`
 
@@ -1483,6 +1493,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (109 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (681 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T20:35:07.351924Z |
+| 2026-09-02 | claude | created task “Clear the dead code the version-negotiation change left behind” |
+| 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (125 characters) |
 | 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (949 characters) |
@@ -1674,14 +1692,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T14:07:21.446938Z |
 | 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (121 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (202 characters) |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (181 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (268 characters) |
-| 2026-08-19 | claude | created milestone “0.4.0 — the Releases screen, and a roadmap that says where you are” |
 
-*Showing the 200 most recent of 2658 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2666 changes. Use `specline_activity` for the rest.*
 
