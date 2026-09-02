@@ -168,13 +168,21 @@ Write the path out in full rather than using `~`. TOML does not expand it, and
 whether the runner does before executing is not something to find out by having
 a hook quietly do nothing. `command -v specline` prints the path to paste.
 
-**4. Trust them.** Run `/hooks` inside Codex and approve the two entries.
+**4. Trust them, from the terminal.** Run `codex` in a terminal to get the
+interactive CLI, then type `/hooks` and approve the two entries. They appear as
+*"New hook — review required"* until you do.
 
-Do not skip this, and do not assume it worked. Codex records a hash of each hook
-and **silently skips any it has not been shown** — no error, no warning, exactly
-the same as having configured nothing. If Specline seems installed but sessions
-start with no project summary, this is almost always why. Changing a hook's
-command later invalidates the trust and needs `/hooks` again.
+`/hooks` is a command of that CLI. It is **not** in the ChatGPT desktop app's
+`/` menu, which lists skills — typing `/hooks` there finds nothing, and it is
+easy to conclude the hooks are not supported rather than that you are in the
+wrong place. Trust is recorded against a hash of each hook in your Codex config,
+so granting it once in the terminal applies wherever Codex runs.
+
+Do not skip this and do not assume it worked. Codex **silently skips any hook it
+has not been shown** — no error, no warning, exactly the same as having
+configured nothing. If Specline seems installed but sessions start with no
+project summary, this is almost always why. Editing a hook's command afterwards
+changes its hash and needs `/hooks` again.
 
 Then restart Codex. MCP servers connect at startup, so the tools will not appear
 in the session you set this up from.
