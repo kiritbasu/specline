@@ -144,16 +144,22 @@ pub fn load<S: EntityStore + DocumentStore>(store: &mut S) -> Result<FixtureSumm
         actor: Actor::Claude,
         session_id: Some("ses_fixture_claude".to_owned()),
         surface: Some(Surface::Code),
+
+        client: None,
     };
     let human = Provenance {
         actor: Actor::Human,
         session_id: Some("ses_fixture_human".to_owned()),
         surface: Some(Surface::Ui),
+
+        client: None,
     };
     let chat = Provenance {
         actor: Actor::Claude,
         session_id: Some("ses_fixture_chat".to_owned()),
         surface: Some(Surface::Chat),
+
+        client: None,
     };
 
     // ---------------------------------------------------------------- Specline

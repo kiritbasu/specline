@@ -106,6 +106,7 @@ fn call(store: &mut Store, name: &str, arguments: Value) -> Value {
         ToolCall {
             name,
             arguments: &arguments,
+            client: None,
         },
     )
     .unwrap_or_else(|e| json!({ "error": { "code": e.code, "message": e.message } }))
@@ -235,6 +236,7 @@ fn every_advertised_tool_is_dispatchable_and_vice_versa() {
             ToolCall {
                 name: tool.name,
                 arguments: &json!({}),
+                client: None,
             },
         );
         if let Err(e) = result {
@@ -253,6 +255,7 @@ fn every_advertised_tool_is_dispatchable_and_vice_versa() {
         ToolCall {
             name: "specline_teleport",
             arguments: &json!({}),
+            client: None,
         },
     )
     .unwrap_err();

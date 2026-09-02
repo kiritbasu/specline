@@ -58,7 +58,7 @@ pub mod types;
 pub mod vocabulary;
 pub mod work;
 
-pub use audit::{Audit, Provenance, now, to_stored_precision};
+pub use audit::{Audit, Client, Provenance, SessionClient, now, to_stored_precision};
 pub use backup::{BackupManifest, backup, restore, verify_restore};
 // `by_session` keeps its module path at call sites rather than being re-exported
 // bare: `changes` is already a local name in `store::patch`, and a crate-root

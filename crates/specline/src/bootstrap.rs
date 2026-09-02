@@ -74,6 +74,8 @@ pub fn run(store: &mut Store, repo_path: Option<String>) -> Result<Summary> {
         actor: Actor::Claude,
         session_id: Some("ses_bootstrap_2026_08_09".to_owned()),
         surface: Some(Surface::Code),
+
+        client: None,
     };
     let mut entities = 0usize;
     let mut links = 0usize;
@@ -1232,6 +1234,8 @@ pub fn archive_other_projects(store: &mut Store, keep: &EntityId) -> Result<usiz
         actor: Actor::Human,
         session_id: Some("ses_bootstrap_2026_08_09".to_owned()),
         surface: Some(Surface::Cli),
+
+        client: None,
     };
 
     let projects = store.list(&EntityQuery::default().of_type(EntityType::Project))?;

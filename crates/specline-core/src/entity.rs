@@ -384,23 +384,34 @@ impl fmt::Display for Actor {
     }
 }
 
-/// Where an act happened.
+/// What *kind* of place an act happened in — not which product.
 ///
 /// SPEC §3.1's audit block lists four values; §6.5 additionally names `cli` as
 /// a fixed sentinel for the command line. The two passages disagree, and this
 /// enum reconciles them by carrying all five — see DECISIONS B-8. The column
 /// is a bare `VARCHAR` with no check constraint, so this costs nothing at the
 /// storage layer.
+///
+/// **Five values, and it stays five.** Naming a product here is the mistake
+/// waiting to be made: `Code` meant Claude Code for as long as Claude Code was
+/// the only agent that spoke MCP, and the moment Codex connected the two became
+/// indistinguishable. The fix for that is not a sixth variant, because the sixth
+/// implies a seventh for Cursor and an eighth for Windsurf, and an enum that
+/// grows with the market has to be migrated every time the market moves. Which
+/// editor wrote something is a *name and a version*, it is self-reported by the
+/// client on every request, and it belongs in open text rather than in a closed
+/// set (KEEL-360).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
-    /// Claude chat.
+    /// A chat client — Claude's, or another with no coding surface.
     Chat,
     /// Cowork.
     Cowork,
-    /// Claude Code.
+    /// A coding agent in a terminal or editor. Claude Code and Codex both land
+    /// here, and the client's own name distinguishes them.
     Code,
-    /// The Tauri desktop app.
+    /// The desktop app or the browser interface the daemon serves.
     Ui,
     /// The `specline` command line.
     Cli,

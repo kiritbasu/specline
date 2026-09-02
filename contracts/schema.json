@@ -2747,6 +2747,75 @@
       ]
     ]
   },
+  "session_clients": {
+    "columns": [
+      [
+        0,
+        "session_id",
+        "TEXT",
+        0,
+        null,
+        1
+      ],
+      [
+        1,
+        "client_name",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "client_title",
+        "TEXT",
+        0,
+        null,
+        0
+      ],
+      [
+        3,
+        "client_version",
+        "TEXT",
+        0,
+        null,
+        0
+      ],
+      [
+        4,
+        "first_seen",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        5,
+        "last_seen",
+        "TEXT",
+        1,
+        null,
+        0
+      ]
+    ],
+    "foreign_keys": [],
+    "indexes": [
+      [
+        0,
+        "idx_session_clients_last_seen",
+        0,
+        "c",
+        0
+      ],
+      [
+        1,
+        "sqlite_autoindex_session_clients_1",
+        1,
+        "pk",
+        0
+      ]
+    ]
+  },
   "specs": {
     "columns": [
       [

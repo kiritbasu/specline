@@ -16,8 +16,8 @@
 use crate::protocol::{RpcError, codes};
 use serde_json::{Map, Value, json};
 use specline_core::{
-    Actor, Cursor, Direction, Entity, EntityId, EntityQuery, EntityStore, EntityType, Error,
-    EventId, GraphStore, NewLink, NewNote, Provenance, Relation, SearchQuery, Surface,
+    Actor, Client, Cursor, Direction, Entity, EntityId, EntityQuery, EntityStore, EntityType,
+    Error, EventId, GraphStore, NewLink, NewNote, Provenance, Relation, SearchQuery, Surface,
 };
 use specline_core::{
     Artifact, Decision, Design, Environment, Feedback, Metric, MetricObservation, Milestone,
@@ -30,6 +30,11 @@ pub struct ToolCall<'a> {
     pub name: &'a str,
     /// The `arguments` object.
     pub arguments: &'a Value,
+    /// The program that sent the request, as the transport reported it.
+    ///
+    /// Borrowed rather than owned so a caller building one per request does not
+    /// clone two strings for the twelve tools that never write.
+    pub client: Option<&'a Client>,
 }
 
 /// Turn a domain error into a JSON-RPC error, preserving what the caller needs.
@@ -277,7 +282,7 @@ fn consumed_by_constructor(entity_type: EntityType) -> &'static [&'static str] {
 /// The default actor is `claude`: this is the MCP transport, and SPEC §6.5
 /// says to fall back to the transport's identity rather than refusing a write.
 /// Losing attribution is bad; refusing the write is worse.
-pub fn provenance_from(args: &Value) -> Result<Provenance, RpcError> {
+pub fn provenance_from(args: &Value, client: Option<&Client>) -> Result<Provenance, RpcError> {
     let surface = match opt_str(args, "surface") {
         None => None,
         Some(s) => Some(
@@ -288,6 +293,7 @@ pub fn provenance_from(args: &Value) -> Result<Provenance, RpcError> {
         actor: Actor::Claude,
         session_id: opt_str(args, "session_id"),
         surface,
+        client: client.cloned(),
     })
 }
 
@@ -421,14 +427,14 @@ pub fn dispatch_prepared(
         "specline_get" => specline_get(store, args),
         "specline_projects" => specline_projects(store, args),
         "specline_activity" => specline_activity(store, args),
-        "specline_create" => specline_create(store, args),
-        "specline_update" => specline_update(store, args),
-        "specline_write_doc" => specline_write_doc(store, args),
-        "specline_link" => specline_link(store, args),
-        "specline_note" => specline_note(store, args),
+        "specline_create" => specline_create(store, args, call.client),
+        "specline_update" => specline_update(store, args, call.client),
+        "specline_write_doc" => specline_write_doc(store, args, call.client),
+        "specline_link" => specline_link(store, args, call.client),
+        "specline_note" => specline_note(store, args, call.client),
         "specline_next" => specline_next(store, args),
-        "specline_claim" => specline_claim(store, args),
-        "specline_close" => specline_close(store, args),
+        "specline_claim" => specline_claim(store, args, call.client),
+        "specline_close" => specline_close(store, args, call.client),
         // INVALID_PARAMS, not METHOD_NOT_FOUND. The JSON-RPC *method* here is
         // `tools/call` and it exists; the tool name is one of its arguments.
         // The distinction is not pedantry: METHOD_NOT_FOUND is served as HTTP
@@ -1252,9 +1258,13 @@ fn sniff_media_type(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn specline_create(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_create(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
     let type_name = req_str(args, "type")?;
-    let provenance = provenance_from(args)?;
+    let provenance = provenance_from(args, client)?;
 
     let title = opt_str(args, "title")
         .or_else(|| opt_str(args, "name"))
@@ -1733,7 +1743,11 @@ fn predecessor_rank(store: &Store, anchor: f64) -> Result<Option<f64>, RpcError>
         .max_by(|a, b| a.total_cmp(b)))
 }
 
-fn specline_update(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_update(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
     let raw_id = req_str(args, "id")?;
     let id = resolve_required(store, "id", &raw_id)?;
     let version = opt_i64(args, "version").ok_or_else(|| {
@@ -1755,7 +1769,7 @@ fn specline_update(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
             "the `version` field from the artifact you read",
         )
     })?;
-    let provenance = provenance_from(args)?;
+    let provenance = provenance_from(args, client)?;
 
     if opt_bool(args, "archive") {
         let archived = store
@@ -1923,11 +1937,15 @@ fn specline_update(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
     ))
 }
 
-fn specline_write_doc(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_write_doc(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
     let raw_id = req_str(args, "id")?;
     let id = resolve_required(store, "id", &raw_id)?;
     let body = req_str(args, "body")?;
-    let provenance = provenance_from(args)?;
+    let provenance = provenance_from(args, client)?;
 
     if !id.entity_type().has_document() {
         return Err(bad_arg(
@@ -2028,8 +2046,12 @@ fn style_note(warnings: &[specline_core::Warning]) -> String {
 /// retracting are rare and the ceiling on the tool surface is real. Adding is
 /// the default and needs no flag: the common case should cost the model no
 /// decision at all.
-fn specline_note(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
-    let provenance = provenance_from(args)?;
+fn specline_note(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
+    let provenance = provenance_from(args, client)?;
 
     if let Some(note_id) = opt_str(args, "retract") {
         let id = specline_core::NoteId::parse(&note_id)
@@ -2075,13 +2097,17 @@ fn specline_note(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
     ))
 }
 
-fn specline_link(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_link(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
     let from = resolve_required(store, "from", &req_str(args, "from")?)?;
     let to = resolve_required(store, "to", &req_str(args, "to")?)?;
     let rel = Relation::parse(&req_str(args, "rel")?)
         .map_err(|e| RpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
     let anchor = opt_str(args, "anchor").unwrap_or_default();
-    let provenance = provenance_from(args)?;
+    let provenance = provenance_from(args, client)?;
 
     if opt_bool(args, "remove") {
         let removed = store
@@ -2316,9 +2342,13 @@ fn resolve_milestone(store: &Store, project: &EntityId, raw: &str) -> Result<Ent
     }
 }
 
-fn specline_claim(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_claim(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
     let id = resolve_required(store, "id", &req_str(args, "id")?)?;
-    let provenance = provenance_from(args)?;
+    let provenance = provenance_from(args, client)?;
     let force = opt_bool(args, "force");
 
     let claimed =
@@ -2343,7 +2373,11 @@ fn specline_claim(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
     ))
 }
 
-fn specline_close(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_close(
+    store: &mut Store,
+    args: &Value,
+    client: Option<&Client>,
+) -> Result<Value, RpcError> {
     let id = resolve_required(store, "id", &req_str(args, "id")?)?;
     let reason = specline_core::CloseReason::parse(&req_str(args, "reason")?)
         .map_err(|e| RpcError::new(codes::INVALID_PARAMS, e.to_string()))?;
@@ -2383,7 +2417,7 @@ fn specline_close(store: &mut Store, args: &Value) -> Result<Value, RpcError> {
             Some(resolved)
         }
     };
-    let provenance = provenance_from(args)?;
+    let provenance = provenance_from(args, client)?;
 
     let request = specline_core::Close {
         reason,
@@ -2582,20 +2616,20 @@ mod tests {
 
     #[test]
     fn provenance_defaults_to_claude_but_keeps_a_supplied_session() {
-        let p = provenance_from(&json!({"session_id": "ses_x", "surface": "chat"})).unwrap();
+        let p = provenance_from(&json!({"session_id": "ses_x", "surface": "chat"}), None).unwrap();
         assert_eq!(p.actor, Actor::Claude);
         assert_eq!(p.session_id.as_deref(), Some("ses_x"));
         assert_eq!(p.surface, Some(Surface::Chat));
 
         // No session is legal — refusing the write would be worse (D-10).
-        let bare = provenance_from(&json!({})).unwrap();
+        let bare = provenance_from(&json!({}), None).unwrap();
         assert_eq!(bare.session_id, None);
         assert_eq!(bare.actor, Actor::Claude);
     }
 
     #[test]
     fn an_unknown_surface_is_rejected_with_the_valid_ones() {
-        let err = provenance_from(&json!({"surface": "fax"})).unwrap_err();
+        let err = provenance_from(&json!({"surface": "fax"}), None).unwrap_err();
         assert!(err.message.contains("chat"), "{}", err.message);
     }
 

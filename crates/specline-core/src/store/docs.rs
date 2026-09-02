@@ -314,6 +314,8 @@ pub(super) fn write_revision_in(
         actor: document.author,
         session_id: document.session_id.clone(),
         surface: document.surface,
+
+        client: None,
     };
     let summary = format!(
         "revised {} “{}” to v{}",

@@ -30,7 +30,7 @@ pub use patch::{FieldChange, apply_changes};
 
 use crate::{
     Cursor, Direction, Document, DocumentDiff, Entity, EntityId, EntityType, Error, Event, Link,
-    NewEvent, NewLink, NewNote, Note, Provenance, Relation, Result,
+    NewEvent, NewLink, NewNote, Note, Provenance, Relation, Result, SessionClient,
 };
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -1563,6 +1563,24 @@ pub trait EntityStore {
 
     /// Append to the mutation log.
     fn append_event(&mut self, event: NewEvent, provenance: &Provenance) -> Result<Event>;
+
+    /// Which program drove a conversation, if it was ever recorded.
+    ///
+    /// `None` covers three different things on purpose, and a caller must not
+    /// tell them apart by guessing: a session that predates KEEL-360, one whose
+    /// transport reported no client, and one that never wrote anything. All
+    /// three are honestly *unknown*, and the one wrong answer is to assume
+    /// Claude Code — right often enough to be believed, wrong exactly where a
+    /// second editor makes the question worth asking.
+    fn client_for_session(&self, session_id: &str) -> Result<Option<SessionClient>>;
+
+    /// Every session that has named its client, most recently seen first.
+    ///
+    /// The answer to "which editors are talking to Specline", subject to the
+    /// caveat that this reports *last seen* and not *connected*: MCP over HTTP
+    /// is stateless, so there is no connection to report and a caller that
+    /// renders one is inventing it.
+    fn session_clients(&self, limit: usize) -> Result<Vec<SessionClient>>;
 
     /// Read the mutation log from a cursor.
     fn events(

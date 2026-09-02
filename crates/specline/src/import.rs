@@ -117,6 +117,8 @@ pub fn file(
         actor: Actor::Human,
         session_id: Some("ses_import".to_owned()),
         surface: Some(Surface::Cli),
+
+        client: None,
     };
 
     let (entity_id, created) = match existing {

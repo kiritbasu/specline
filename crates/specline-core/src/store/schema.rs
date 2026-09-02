@@ -871,8 +871,48 @@ pub fn migrations() -> Vec<Migration> {
             name: "documents_are_embedded_as_passages",
             sql: passages,
         },
+        Migration {
+            id: 5,
+            name: "a_session_records_the_client_that_opened_it",
+            sql: SESSION_CLIENTS,
+        },
     ]
 }
+
+/// One row per conversation, naming the program that drove it (KEEL-360).
+///
+/// A `surface` says what kind of place a write came from and there are five of
+/// them; it cannot say *which editor*, and once Claude Code and Codex are both
+/// writing `code` the two are indistinguishable in the store.
+///
+/// **A table rather than a column, and that is the whole design.** Every write
+/// already stamps a `session_id` — on the audit block of all thirteen entity
+/// types, on notes, on document revisions, on events — so one row per session
+/// resolves the question for every one of them, including rows written before
+/// this table existed, without a column on any of them. A conversation is one
+/// client, so per-write storage would repeat the same two strings thousands of
+/// times to answer a question asked per session.
+///
+/// `first_seen` and `last_seen` are kept because they are free here and are
+/// what "which editors are talking to Specline" needs (KEEL-359) — the same
+/// row serves the provenance question and the liveness one.
+///
+/// Nothing backfills. Every session that wrote before this migration has no row
+/// and must read as *unknown* rather than as Claude Code, which is a guess that
+/// would be right often enough to be trusted and wrong exactly where a second
+/// editor makes it interesting.
+const SESSION_CLIENTS: &str = "
+CREATE TABLE IF NOT EXISTS session_clients (
+  session_id     TEXT PRIMARY KEY,
+  client_name    TEXT NOT NULL,
+  client_title   TEXT,
+  client_version TEXT,
+  first_seen     TEXT NOT NULL,
+  last_seen      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_clients_last_seen
+  ON session_clients (last_seen DESC);
+";
 
 /// Add the passage table and rewire archiving to clear it (B-55).
 ///

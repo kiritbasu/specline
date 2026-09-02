@@ -66,6 +66,8 @@ impl Daemon {
                 actor: Actor::Claude,
                 session_id: Some("ses_budget".to_owned()),
                 surface: Some(specline_core::Surface::Code),
+
+                client: None,
             };
             for entity in tasks.items.iter().take(20) {
                 for n in 0..3 {

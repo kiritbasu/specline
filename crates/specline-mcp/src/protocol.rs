@@ -15,6 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use specline_core::Client;
 
 /// The current protocol revision.
 pub const PROTOCOL_VERSION: &str = "2026-07-28";
@@ -83,6 +84,69 @@ pub fn requested_version(request: &Request, version_header: Option<&str>) -> Opt
                 .map(str::to_owned)
         })
         .or_else(|| request.declared_version())
+}
+
+/// The most of a client's own description that is worth keeping.
+///
+/// Both halves are strings a caller chose, and they get stored, so something
+/// has to bound them. Hyper caps the header block long before this matters and
+/// `clientInfo` sits inside the body limit, so this is not a defence — it is a
+/// promise that a row of `session_clients` stays the size of a name and a
+/// version rather than the size of whatever turned up.
+const MAX_CLIENT_FIELD: usize = 120;
+
+/// Keep the front of a caller-supplied string, on a character boundary.
+fn clip(value: &str) -> String {
+    match value.char_indices().nth(MAX_CLIENT_FIELD) {
+        None => value.to_owned(),
+        Some((end, _)) => value[..end].to_owned(),
+    }
+}
+
+/// Who is calling, from whatever the request actually carries.
+///
+/// **`User-Agent` first, and that ordering is the finding.** The obvious source
+/// is `_meta`'s `clientInfo`, which the current revision puts on every request
+/// — and every client shipping today is on an older one, where `clientInfo`
+/// appears in the `initialize` handshake and nowhere else. Codex was captured
+/// off the wire doing exactly that: five requests, `clientInfo` on the
+/// handshake only, and none on the `tools/call` that did the writing. A reader
+/// of `_meta` alone would identify nobody at the moment it mattered.
+///
+/// `User-Agent` was on all five. It is a header rather than a protocol field,
+/// which is why it survives an era the protocol field does not.
+///
+/// `clientInfo` still wins when it is there: it carries a display title that a
+/// user agent has nowhere to put, and a client sending both is telling you the
+/// same thing twice with more detail once.
+///
+/// `name/version` is the user-agent convention rather than a rule. A value with
+/// no slash becomes the whole name and no version, because a name with no
+/// version beats guessing where one ends.
+pub fn client_of(request: &Request, user_agent: Option<&str>) -> Option<Client> {
+    if let Some(info) = request.client_info()
+        && let Some(name) = info.get("name").and_then(Value::as_str)
+    {
+        return Some(Client {
+            name: clip(name),
+            title: info.get("title").and_then(Value::as_str).map(clip),
+            version: info.get("version").and_then(Value::as_str).map(clip),
+        });
+    }
+
+    let agent = user_agent?.trim();
+    if agent.is_empty() {
+        return None;
+    }
+    let (name, version) = match agent.split_once('/') {
+        Some((n, v)) if !n.is_empty() && !v.is_empty() => (n, Some(v.to_owned())),
+        _ => (agent, None),
+    };
+    Some(Client {
+        name: clip(name),
+        title: None,
+        version: version.as_deref().map(clip),
+    })
 }
 
 /// The revision to answer `initialize` with, given what the client asked for.
@@ -810,6 +874,108 @@ mod tests {
 
         let modern = initialize_result(PROTOCOL_VERSION);
         assert_eq!(modern["protocolVersion"], PROTOCOL_VERSION);
+    }
+
+    // --- who is calling ----------------------------------------------------
+
+    /// The reason `client_of` reads a header at all.
+    ///
+    /// Captured off the wire from `codex-mcp-client/0.148.0-alpha.15`: five
+    /// requests, `clientInfo` on the `initialize` handshake and on nothing
+    /// else, including the `tools/call` that did the writing. Reading `_meta`
+    /// alone would identify nobody at the moment identity is worth recording,
+    /// and this asserts the shape that made that true rather than trusting the
+    /// memory of it.
+    #[test]
+    fn a_legacy_client_is_identified_from_its_user_agent() {
+        let call = request("tools/call", json!({ "_meta": { "callId": "exec-1" } }));
+
+        let client = client_of(&call, Some("codex-mcp-client/0.148.0-alpha.15"))
+            .expect("a user agent is enough on its own");
+        assert_eq!(client.name, "codex-mcp-client");
+        assert_eq!(client.version.as_deref(), Some("0.148.0-alpha.15"));
+        assert_eq!(client.title, None, "a header has nowhere to put one");
+    }
+
+    /// `clientInfo` wins where both are present, because it says more.
+    #[test]
+    fn a_declared_client_beats_the_user_agent() {
+        let call = request(
+            "tools/call",
+            json!({
+                "_meta": {
+                    META_CLIENT_INFO: {
+                        "name": "codex-mcp-client",
+                        "title": "Codex",
+                        "version": "0.148.0-alpha.15"
+                    }
+                }
+            }),
+        );
+
+        let client = client_of(&call, Some("something-else/9")).expect("declared identity");
+        assert_eq!(client.name, "codex-mcp-client");
+        assert_eq!(
+            client.title.as_deref(),
+            Some("Codex"),
+            "the title is the whole reason to prefer this source"
+        );
+    }
+
+    /// Nothing to go on is `None`, not a guess.
+    #[test]
+    fn no_identity_anywhere_is_no_client() {
+        let call = request("tools/call", json!({}));
+        assert!(client_of(&call, None).is_none());
+        assert!(
+            client_of(&call, Some("   ")).is_none(),
+            "a blank header is not a name"
+        );
+    }
+
+    /// `name/version` is a convention, and a value that ignores it still works.
+    #[test]
+    fn a_user_agent_without_a_version_is_all_name() {
+        let call = request("tools/call", json!({}));
+
+        let plain = client_of(&call, Some("some-editor")).unwrap();
+        assert_eq!(plain.name, "some-editor");
+        assert_eq!(
+            plain.version, None,
+            "a name with no version beats guessing where one ends"
+        );
+
+        // A trailing slash names nothing after it, so it is not a version.
+        let trailing = client_of(&call, Some("odd/")).unwrap();
+        assert_eq!(trailing.name, "odd/");
+        assert_eq!(trailing.version, None);
+    }
+
+    /// A caller does not get to decide how much of this table it occupies.
+    #[test]
+    fn a_client_that_describes_itself_at_length_is_clipped() {
+        let call = request("tools/call", json!({}));
+        let long = "x".repeat(500);
+
+        let client = client_of(&call, Some(&format!("{long}/{long}"))).unwrap();
+        assert_eq!(client.name.chars().count(), MAX_CLIENT_FIELD);
+        assert_eq!(
+            client.version.map(|v| v.chars().count()),
+            Some(MAX_CLIENT_FIELD)
+        );
+    }
+
+    /// Clipping counts characters, so a multi-byte name cannot be split.
+    #[test]
+    fn clipping_never_lands_inside_a_character() {
+        let call = request("tools/call", json!({}));
+        // Four bytes each, so a byte-indexed cut would panic or produce
+        // mojibake long before the character count is reached.
+        let emoji = "🙂".repeat(500);
+
+        let client = client_of(&call, Some(&emoji)).expect("still a name");
+        assert_eq!(client.name.chars().count(), MAX_CLIENT_FIELD);
+        assert!(client.name.chars().all(|c| c == '🙂'));
     }
 
     /// Two lists that must not drift.

@@ -50,6 +50,7 @@ fn call(store: &mut Store, args: Value) -> Result<Value, specline_mcp::protocol:
         ToolCall {
             name: "specline_create",
             arguments: &args,
+            client: None,
         },
     )
 }
@@ -258,6 +259,7 @@ fn an_existing_design_can_be_given_an_image_afterwards() {
                 "changes": { "image_path": path },
                 "session_id": "ses_t", "surface": "code"
             }),
+            client: None,
         },
     )
     .expect("attaching to something that already exists");

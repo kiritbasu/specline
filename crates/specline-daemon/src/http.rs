@@ -417,6 +417,12 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
     // which revision to claim back. Answering in a revision the caller did not
     // offer is what locked Codex out (KEEL-355).
     let asked_for = requested_version(&request, header_of(HEADER_PROTOCOL_VERSION));
+    // Who is calling, so a write can say which editor made it (KEEL-360).
+    // Read here because `header_of` borrows the headers and the dispatch below
+    // needs the answer, and computed for every request rather than only for a
+    // write: it is two `Option`s and a `split_once`, and a branch to skip that
+    // would cost more to read than it saves.
+    let caller = specline_mcp::protocol::client_of(&request, header_of("user-agent"));
     let era = match check_headers(
         &request,
         header_of(HEADER_METHOD),
@@ -479,6 +485,7 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
                 specline_mcp::ToolCall {
                     name,
                     arguments: request.arguments(),
+                    client: caller.as_ref(),
                 },
                 query_vector,
             );
@@ -902,6 +909,11 @@ fn person_at_the_interface() -> specline_core::Provenance {
     specline_core::Provenance {
         actor: specline_core::Actor::Human,
         session_id: None,
+        // No client either, and for the same reason as the session: the caller
+        // is a person, and `ui` already says everything a reader needs. A
+        // browser's user agent would name Chrome, which is true and answers a
+        // question nobody asked.
+        client: None,
         surface: Some(specline_core::Surface::Ui),
     }
 }
@@ -1602,6 +1614,7 @@ async fn api_context(
         specline_mcp::ToolCall {
             name: "specline_context",
             arguments: &args,
+            client: None,
         },
     ))
 }
@@ -1617,6 +1630,7 @@ async fn api_projects(
         specline_mcp::ToolCall {
             name: "specline_projects",
             arguments: &args,
+            client: None,
         },
     ))
 }
@@ -1632,6 +1646,7 @@ async fn api_search(
         specline_mcp::ToolCall {
             name: "specline_search",
             arguments: &args,
+            client: None,
         },
     ))
 }
@@ -1688,6 +1703,7 @@ async fn api_ready(
         specline_mcp::ToolCall {
             name: "specline_next",
             arguments: &args,
+            client: None,
         },
     );
 
@@ -2092,6 +2108,7 @@ async fn api_activity(
         specline_mcp::ToolCall {
             name: "specline_activity",
             arguments: &args,
+            client: None,
         },
     ))
 }
@@ -2141,6 +2158,7 @@ async fn api_entity(
         specline_mcp::ToolCall {
             name: "specline_get",
             arguments: &args,
+            client: None,
         },
     ))
 }

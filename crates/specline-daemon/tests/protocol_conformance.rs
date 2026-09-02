@@ -362,3 +362,49 @@ async fn the_tool_list_has_the_shape_a_client_expects() {
         );
     }
 }
+
+/// A write says which editor made it, from the header alone.
+///
+/// The end of the chain KEEL-360 built: `User-Agent` on the request, through
+/// `client_of` and `Provenance`, into `session_clients`, and back out of the
+/// store. Driven through the daemon because the header is the one link that
+/// exists nowhere else — a test below this level would assert the plumbing it
+/// had just constructed.
+///
+/// The user agent is Codex's real one, and the request carries no `clientInfo`,
+/// because that is the combination a legacy client actually sends.
+#[tokio::test]
+async fn a_write_records_the_editor_that_made_it() {
+    let (base, dir) = daemon().await;
+
+    let (status, body) = post(
+        &base,
+        &[("user-agent", "codex-mcp-client/0.148.0-alpha.15")],
+        rpc(
+            "tools/call",
+            json!({
+                "name": "specline_create",
+                "arguments": {
+                    "type": "project",
+                    "title": "Written From Codex",
+                    "slug": "from-codex",
+                    "session_id": "ses_from_codex",
+                    "surface": "code"
+                }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.get("error").is_none(), "{body}");
+
+    // Read it back through the store the daemon just wrote to.
+    let store = specline_core::Store::open(dir.path().join("specline.sqlite"))
+        .expect("open the store the daemon wrote");
+    let recorded = specline_core::EntityStore::client_for_session(&store, "ses_from_codex")
+        .expect("read the session's client")
+        .expect("the write named its editor");
+
+    assert_eq!(recorded.client.name, "codex-mcp-client");
+    assert_eq!(recorded.client.version.as_deref(), Some("0.148.0-alpha.15"));
+}

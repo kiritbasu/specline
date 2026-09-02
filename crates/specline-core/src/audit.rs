@@ -11,7 +11,42 @@ use crate::{Actor, Surface};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Who is writing, on behalf of what conversation, from where.
+/// Which program is talking, as it describes itself.
+///
+/// The `Surface` on a write says what kind of place it came from; this says
+/// which product, and they are different questions. `code` covers Claude Code
+/// and Codex alike, and once both are in use the surface alone cannot tell a
+/// reader which of them wrote a row (KEEL-360).
+///
+/// **Observed, not declared, and that is what makes it different from
+/// `session_id`.** D-10 has the daemon refuse to invent a session because a
+/// stateless transport has none to borrow, so attribution there is cooperative
+/// and a model has to pass it. Client identity is not like that: MCP carries it
+/// on the request itself, so recording it is writing down what the transport
+/// said. No tool argument, nothing for a model to get wrong or omit.
+///
+/// Self-reported all the same. `claude-code` and `codex-mcp-client` are names
+/// the client chose for itself, trivially spoofable, and fine for saying where
+/// a row came from — this is provenance for a reader, not identity for a
+/// decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Client {
+    /// The client's own name, e.g. `claude-code` or `codex-mcp-client`.
+    pub name: String,
+    /// A display name when the client offers one, e.g. `Codex`.
+    pub title: Option<String>,
+    /// The client's version string, if it sent one.
+    pub version: Option<String>,
+}
+
+impl Client {
+    /// What to show a reader: the title if there is one, else the raw name.
+    pub fn display_name(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// Who is writing, on behalf of what conversation, from where, using what.
 ///
 /// Supplied by the caller on every mutation. The daemon never invents a
 /// `session_id` (D-10): a stateless transport has no session to borrow, so
@@ -26,6 +61,13 @@ pub struct Provenance {
     pub session_id: Option<String>,
     /// The surface the write arrived on.
     pub surface: Option<Surface>,
+    /// The program that sent the request, when the transport reported one.
+    ///
+    /// Recorded against the session rather than against the row: every write
+    /// already carries a `session_id`, one conversation is one client, and a
+    /// row per session is a great deal less than a column on thirteen tables
+    /// that would record only the first and last writer anyway.
+    pub client: Option<Client>,
 }
 
 impl Provenance {
@@ -38,6 +80,7 @@ impl Provenance {
             actor,
             session_id: None,
             surface: None,
+            client: None,
         }
     }
 
@@ -48,6 +91,7 @@ impl Provenance {
             actor: Actor::System,
             session_id: Some(surface.as_str().to_owned()),
             surface: Some(surface),
+            client: None,
         }
     }
 
@@ -60,6 +104,12 @@ impl Provenance {
     /// Attach a surface.
     pub fn with_surface(mut self, surface: Surface) -> Self {
         self.surface = Some(surface);
+        self
+    }
+
+    /// Attach the client the transport reported.
+    pub fn with_client(mut self, client: Client) -> Self {
+        self.client = Some(client);
         self
     }
 }
@@ -280,4 +330,26 @@ mod tests {
             "an update must not restamp the creation half"
         );
     }
+}
+
+/// A session and the client that drove it, as stored.
+///
+/// [`Client`] is what a request reports; this is what the store keeps, with the
+/// session it belongs to and the window it was seen in. Separate types because
+/// they answer different questions — one is an input to a write, the other is a
+/// row somebody reads back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionClient {
+    /// The conversation this describes.
+    pub session_id: String,
+    /// The program that drove it.
+    pub client: Client,
+    /// The first write this session made.
+    pub first_seen: DateTime<Utc>,
+    /// The most recent one.
+    ///
+    /// Not a heartbeat. A session that is reading rather than writing does not
+    /// move this, so an old `last_seen` means "has not written lately" and
+    /// never "has gone away".
+    pub last_seen: DateTime<Utc>,
 }

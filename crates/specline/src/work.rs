@@ -57,6 +57,7 @@ pub fn ready(
                 specline_mcp::ToolCall {
                     name: "specline_next",
                     arguments: &args,
+                    client: None,
                 },
             )
             .map(|v| specline_mcp::payload(&v))
@@ -360,6 +361,7 @@ fn run_write(home: &Path, daemon: &str, tool: &str, args: &Value) -> Result<Valu
                     specline_mcp::ToolCall {
                         name: tool,
                         arguments: args,
+                        client: None,
                     },
                 )
                 // The same unwrapping the daemon path does. Without it every

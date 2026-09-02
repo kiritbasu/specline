@@ -68,6 +68,7 @@ fn call(store: &mut Store, name: &str, arguments: Value) -> Result<Value, String
         ToolCall {
             name,
             arguments: &arguments,
+            client: None,
         },
     )
     .map_err(|e| e.message)

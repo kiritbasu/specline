@@ -47,6 +47,7 @@ use super::rows::{
     LINK_COLUMNS, col_err, from_row, get_ots, get_ts, insert_params, insert_stmt, ots, read_link,
     select_from, ts,
 };
+use crate::SessionClient;
 use crate::store::patch::{apply_changes, is_status_change};
 use crate::store::rows::{Col, spec_for};
 use crate::store::{Created, EntityQuery, EntityStore, Page};
@@ -385,6 +386,55 @@ fn count(conn: &Connection, sql: &str, params: Vec<Value>) -> Result<usize> {
         .query_row(sql, params_from_iter(params), |r| r.get(0))
         .map_err(Error::storage("count matching rows"))?;
     Ok(n.max(0) as usize)
+}
+
+/// The columns [`read_session_client`] expects, in one place so a query and its
+/// reader cannot drift apart.
+const SESSION_CLIENT_COLUMNS: &str = "SELECT session_id, client_name, client_title, \
+                                      client_version, first_seen, last_seen";
+
+/// Read one `session_clients` row.
+fn read_session_client(row: &Row<'_>) -> Result<SessionClient> {
+    Ok(SessionClient {
+        session_id: row
+            .get::<_, String>("session_id")
+            .map_err(col_err("session_clients", "session_id"))?,
+        client: crate::Client {
+            name: row
+                .get::<_, String>("client_name")
+                .map_err(col_err("session_clients", "client_name"))?,
+            title: row
+                .get::<_, Option<String>>("client_title")
+                .map_err(col_err("session_clients", "client_title"))?,
+            version: row
+                .get::<_, Option<String>>("client_version")
+                .map_err(col_err("session_clients", "client_version"))?,
+        },
+        first_seen: get_ts(row, "session_clients", "first_seen")?,
+        last_seen: get_ts(row, "session_clients", "last_seen")?,
+    })
+}
+
+/// Run a session-client query and read the rows.
+fn query_session_clients(
+    conn: &Connection,
+    sql: &str,
+    params: Vec<Value>,
+) -> Result<Vec<SessionClient>> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(Error::storage("prepare a session client query"))?;
+    let mut rows = stmt
+        .query(params_from_iter(params))
+        .map_err(Error::storage("run a session client query"))?;
+    let mut out = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(Error::storage("read a session client row"))?
+    {
+        out.push(read_session_client(row)?);
+    }
+    Ok(out)
 }
 
 /// Run a note query and read the rows.
@@ -775,7 +825,60 @@ pub(super) fn append_event_inner(
         stored.action, stored.entity_id
     )))?;
 
+    record_session_client(conn, provenance, now)?;
+
     Ok(stored)
+}
+
+/// Note which program this session is being driven by (KEEL-360).
+///
+/// Here rather than at each call site because this function is already the one
+/// place every mutation passes through — a create, an update, an archive and a
+/// document revision all land on it, in the transaction that is writing them.
+/// Anywhere else and the answer would be right for whichever writes somebody
+/// remembered.
+///
+/// Needs both halves to say anything. No `session_id` and there is nothing to
+/// key on; no client and there is nothing to record, which is every write from
+/// the CLI and from the interface, and both of those are adequately described
+/// by their surface already.
+///
+/// `last_seen` moves on every write and `first_seen` does not, so the row says
+/// when a conversation started as well as when it was last heard from. The
+/// name and version are refreshed too: a client that updates mid-session should
+/// read as the version now running rather than the one it opened with.
+fn record_session_client(
+    conn: &Connection,
+    provenance: &Provenance,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let (Some(session_id), Some(client)) = (&provenance.session_id, &provenance.client) else {
+        return Ok(());
+    };
+
+    conn.execute(
+        "INSERT INTO session_clients \
+           (session_id, client_name, client_title, client_version, first_seen, last_seen) \
+         VALUES (?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(session_id) DO UPDATE SET \
+           client_name = excluded.client_name, \
+           client_title = excluded.client_title, \
+           client_version = excluded.client_version, \
+           last_seen = excluded.last_seen",
+        params_from_iter(vec![
+            text(session_id),
+            text(&client.name),
+            otext(client.title.clone()),
+            otext(client.version.clone()),
+            ts(now),
+            ts(now),
+        ]),
+    )
+    .map_err(Error::storage(format!(
+        "record the client for session {session_id}"
+    )))?;
+
+    Ok(())
 }
 
 /// Resolve the project an entity belongs to, for event tagging.
@@ -1536,6 +1639,25 @@ impl EntityStore for Store {
         append_event_inner(self.connection(), event, provenance, Utc::now())
     }
 
+    fn client_for_session(&self, session_id: &str) -> Result<Option<SessionClient>> {
+        Ok(query_session_clients(
+            self.connection(),
+            &format!("{SESSION_CLIENT_COLUMNS} FROM session_clients WHERE session_id = ?"),
+            vec![text(session_id)],
+        )?
+        .pop())
+    }
+
+    fn session_clients(&self, limit: usize) -> Result<Vec<SessionClient>> {
+        query_session_clients(
+            self.connection(),
+            &format!(
+                "{SESSION_CLIENT_COLUMNS} FROM session_clients ORDER BY last_seen DESC LIMIT ?"
+            ),
+            vec![Value::Integer(limit as i64)],
+        )
+    }
+
     fn events(
         &self,
         cursor: &Cursor,
@@ -1882,6 +2004,11 @@ impl EntityStore for Store {
         };
 
         insert_note_row(self.connection(), &stored)?;
+        // A note is the one mutation that appends no event, so the recording
+        // that rides on `append_event_inner` never fires for it. A session that
+        // only ever annotates — which is most of what a conversation does once
+        // the row exists — would otherwise have no client on file at all.
+        record_session_client(self.connection(), provenance, stored.created_at)?;
 
         Ok(stored)
     }
