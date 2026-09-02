@@ -1,15 +1,29 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:53:09Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T21:57:13Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (317)
+## Closed work (318)
 
 ### 2026-09-02
+
+- **KEEL-360** Record which editor a write came from, so a row says where it originated — `done`
+
+  The store records which editor made a write, keyed by session. Split rather than finished whole — showing it in the app is KEEL-361, and the split is on the note above.
+  
+  A `session_clients` table, one row per conversation, so every task, note, revision and event resolves through the session id it already carries rather than through a column on thirteen types. Schema 4 to 5, purely additive. Nothing backfilled: a session with no row reads as unknown, because assuming Claude Code would be right nearly always and wrong exactly where a second editor makes it interesting.
+  
+  The source is the `User-Agent` header rather than `_meta`'s `clientInfo`, and that was a correction to the first draft: Codex sends `clientInfo` on the handshake and on nothing else, so reading `_meta` alone would have identified nobody at the moment it mattered. `add_note` records separately because a note appends no event, which the first version missed and its tests missed with it.
+  
+  `Surface::Code`'s doc comment no longer claims to mean Claude Code, and says why a sixth variant is the wrong fix.
+  
+  Both clippy configurations and both suites clean: 1,291 tests with embeddings on, 1,290 without, up 15.
+
+  <sub>commit:6ee4135 · test:cargo test --workspace · test:cargo test --workspace --exclude specline-embed --no-default-features</sub>
 
 - **KEEL-358** The README only tells you how to install for Claude Code — `done`
 
@@ -1515,6 +1529,18 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (125 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (1183 characters) |
+| 2026-09-02 | claude | “Show the editor a row came from, in the app and the API” depends on “Record which editor a write came from, so a row says where…” (stored as “Record which editor a write came from, so a row says where…” blocks “Show the editor a row came from, in the app and the API”) |
+| 2026-09-02 | claude | created task “Show the editor a row came from, in the app and the API” |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T21:23:48.682513Z |
+| 2026-09-02 | claude | “Record which editor a write came from, so a row says where…” references “Show which editors are configured and which have actually…” |
+| 2026-09-02 | claude | created task “Record which editor a write came from, so a row says where it originated” |
+| 2026-09-02 | claude | created task “Show which editors are configured and which have actually called” |
+| 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → ["commit:f3240ec"] |
 | 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (880 characters) |
@@ -1702,18 +1728,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_message none → (271 characters) |
 | 2026-08-19 | claude | status todo → in_progress |
 | 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T14:10:27.785045Z |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (268 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (339 characters) |
-| 2026-08-19 | claude | created task “A task that turns out to be a signal has no honest way to close” |
-| 2026-08-19 | claude | “Support openai codex” references “Specline should work with OpenAI Codex, not only Claude Code” |
-| 2026-08-19 | claude | “allow adding new Feature Requests” references “A feature request needs somewhere to live that is not a…” |
-| 2026-08-19 | claude | “periodic management of lots of open issues” references “Open work piles up until it is too expensive to read, and…” |
-| 2026-08-19 | claude | status todo → wont_do |
-| 2026-08-19 | claude | close_reason none → wont_do |
-| 2026-08-19 | claude | close_message none → (343 characters) |
 
-*Showing the 200 most recent of 2682 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2694 changes. Use `specline_activity` for the rest.*
 
