@@ -112,6 +112,25 @@ Codex has no plugin to install, so the three things the plugin does — get the
 daemon running, register the MCP server, install the hooks — are three separate
 steps here. None of them needs Claude Code.
 
+**First, check you can run `codex` at all.** Two of the steps below are CLI
+commands, and if you installed Codex as the ChatGPT desktop app there is no
+`codex` on your `PATH` — the binary lives inside the app bundle.
+
+```bash
+command -v codex || ls /Applications/ChatGPT.app/Contents/Resources/codex
+```
+
+If only the second half printed anything, link it somewhere on your `PATH`
+once:
+
+```bash
+ln -s "/Applications/ChatGPT.app/Contents/Resources/codex" ~/.local/bin/codex
+```
+
+Use a directory that is actually on your `PATH` — `~/.local/bin` is common but
+not universal, and `echo $PATH` settles it. Everything below assumes `codex`
+runs.
+
 **1. Get the daemon running.** The setup script is the same one
 `/specline:setup` runs, and it does not know or care which editor you use.
 
@@ -168,7 +187,7 @@ Write the path out in full rather than using `~`. TOML does not expand it, and
 whether the runner does before executing is not something to find out by having
 a hook quietly do nothing. `command -v specline` prints the path to paste.
 
-**4. Trust them, from the terminal.** Run `codex` in a terminal to get the
+**4. Trust them, from the terminal.** Run `codex` with no arguments to get the
 interactive CLI, then type `/hooks` and approve the two entries. They appear as
 *"New hook — review required"* until you do.
 
