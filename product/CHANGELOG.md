@@ -1,13 +1,23 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-08-19T21:22:34Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T18:46:16Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (311)
+## Closed work (312)
+
+### 2026-09-02
+
+- **KEEL-352** Verify the repository builds and tests clean from the external drive — `done`
+
+  The repository builds and tests clean from the external drive. A full clean rebuild, `cargo fmt --all --check`, both clippy configurations and both test suites all pass from /Volumes/mydrv/development/specline, and nothing turned out to depend on where the checkout lives. The details, and the four things about the new volume worth knowing, are on the note.
+  
+  One thing this did not settle: the project row still records `root_path` as /Users/h8hcn/development/specline, and that checkout still exists with a daemon running against it. Which of the two copies is canonical is a decision rather than a build problem, so it is left alone.
+
+  <sub>test:cargo test --workspace · test:cargo test --workspace --exclude specline-embed --no-default-features · test:cargo clippy --workspace --all-targets -- -D warnings · test:cargo clippy --workspace --exclude specline-embed --all-targets --no-default-features -- -D warnings</sub>
 
 ### 2026-08-19
 
@@ -1454,6 +1464,17 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-02 | claude | revised decision “The working copy lives on the external drive, and the project row points at it” to v1 |
+| 2026-09-02 | claude | created decision “The working copy lives on the external drive, and the project row points at it” |
+| 2026-09-02 | claude | root_path /Users/h8hcn/development/specline → /Volumes/mydrv/development/specline |
+| 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → (277 characters) |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (636 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T18:32:14.974175Z |
+| 2026-09-02 | claude | created task “Verify the repository builds and tests clean from the external drive” |
 | 2026-08-19 | claude | status todo → done |
 | 2026-08-19 | claude | evidence [] → (163 characters) |
 | 2026-08-19 | claude | close_reason none → done |
@@ -1643,17 +1664,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T11:44:37.582422Z |
 | 2026-08-19 | claude | created task “Fix what the review found in the roadmap progress work” |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → ["commit:pending","doc:spc_01KZKMPVNTZAZHC9HY1TSNZNGM"] |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (394 characters) |
-| 2026-08-19 | human | revised spec “Specline — Technical Specification” to v10 |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T11:20:30.391650Z |
-| 2026-08-19 | claude | status open → answered |
-| 2026-08-19 | claude | created task “SPEC promises "overdue milestones" in the digest and nothing computes it” |
-| 2026-08-19 | claude | “The roadmap shows derived progress, not a target date, and…” resolves “The roadmap's target column is empty on every open phase.…” |
 
-*Showing the 200 most recent of 2627 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2638 changes. Use `specline_activity` for the rest.*
 
