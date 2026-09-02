@@ -1,15 +1,29 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:20:37Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:24:00Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (323)
+## Closed work (324)
 
 ### 2026-09-02
+
+- **KEEL-367** Uninstalling is nine commands typed by hand, and should be a script — `done`
+
+  `plugin/scripts/uninstall.sh` replaces the nine commands the README listed an hour ago. It stops the service through the service manager, removes the service definition and the two binaries, and keeps the store.
+  
+  The store needs `--purge`, which backs it up before deleting — through `specline backup` when the binary is still there, and a plain directory copy when it is not, refusing to delete anything it could not first copy. Both paths were run against a scratch HOME, including the one where no binary is left to back up with; the fallback copy came out intact.
+  
+  It leaves editor configuration alone and prints the two commands instead, which is the line install.sh already draws on the way in.
+  
+  Running the dry run against the live install found the bug worth finding: it warned that something was still answering on the port, in the one mode where nothing had been stopped — the script complaining about a state it had chosen itself.
+  
+  No `/specline:uninstall` to match `/specline:setup`, and the commit says why: installing is what somebody does inside Claude Code before they have a terminal habit, while removing is rare, deliberate, and carries a `--purge` flag that has no business one keystroke from a model.
+
+  <sub>commit:04a2dd7</sub>
 
 - **KEEL-366** The README says how to install Specline and never how to stop or remove it — `done`
 
@@ -1583,6 +1597,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → ["commit:04a2dd7"] |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (1221 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T23:21:18.375206Z |
+| 2026-09-02 | claude | created task “Uninstalling is nine commands typed by hand, and should be a script” |
+| 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → ["commit:7544921","test:cargo test --workspace"] |
 | 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (848 characters) |
@@ -1774,14 +1796,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_message none → (312 characters) |
 | 2026-08-19 | claude | status todo → in_progress |
 | 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T16:25:05.417738Z |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (122 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (327 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_964b1889-ae01-4634-9dad-c0ca98e1546c |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T16:06:54.828842Z |
 
-*Showing the 200 most recent of 2737 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2745 changes. Use `specline_activity` for the rest.*
 
