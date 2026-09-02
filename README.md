@@ -120,12 +120,21 @@ commands, and if you installed Codex as the ChatGPT desktop app there is no
 command -v codex || ls /Applications/ChatGPT.app/Contents/Resources/codex
 ```
 
-If only the second half printed anything, link it somewhere on your `PATH`
-once:
+If only the second half printed anything, put a small wrapper on your `PATH`
+rather than a symlink:
 
 ```bash
-ln -s "/Applications/ChatGPT.app/Contents/Resources/codex" ~/.local/bin/codex
+printf '#!/bin/sh\nexec "/Applications/ChatGPT.app/Contents/Resources/codex" "$@"\n' \
+  > ~/.local/bin/codex && chmod +x ~/.local/bin/codex
 ```
+
+**A symlink here looks equivalent and is not.** Codex resolves its helper
+executables — `codex-code-mode-host` among them — relative to the binary it was
+launched as, so a symlink sends it hunting for siblings in your `bin` directory
+that only exist inside the app bundle. Code Mode then fails closed and takes
+tool calls down with it, reporting a missing host rather than anything to do
+with the link. `exec` of the absolute path makes the bundled binary the running
+process, and the siblings resolve.
 
 Use a directory that is actually on your `PATH` — `~/.local/bin` is common but
 not universal, and `echo $PATH` settles it. Everything below assumes `codex`
@@ -206,10 +215,17 @@ changes its hash and needs `/hooks` again.
 Then restart Codex. MCP servers connect at startup, so the tools will not appear
 in the session you set this up from.
 
-**5. Check it.** `specline doctor` from a terminal says whether the daemon is
-up and what it is serving. Inside Codex, ask it to call `specline_context` — if
-the tools are connected it will answer with the project, and if they are not it
-will say the tool is unavailable rather than guessing.
+**5. Check it.** One command proves all three pieces at once:
+
+```bash
+codex exec --sandbox read-only "Call the specline_projects tool and reply with just the number it returned."
+```
+
+A working install prints four things: `hook: SessionStart`, then
+`mcp: specline/specline_projects started` and `completed`, then a number, then
+`hook: Stop`. Anything missing says which piece is not wired — no
+`hook:` lines means the hooks are not trusted, and a tool the model reports as
+unavailable means the MCP server is not connected.
 
 ### Running both at once
 
