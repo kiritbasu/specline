@@ -1,15 +1,25 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:46:37Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T20:53:09Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (316)
+## Closed work (317)
 
 ### 2026-09-02
+
+- **KEEL-358** The README only tells you how to install for Claude Code — `done`
+
+  The README now has a Codex path: the setup script on its own, `codex mcp add --url`, the two hooks in config.toml, `/hooks` to trust them, and how to check it took. Install is framed as the two jobs it always was rather than as three Claude Code commands, and the opening line no longer says Claude is the only thing that reads the store.
+  
+  The hook trust step got the most space deliberately. Codex hashes each hook and skips any it has not been shown, with no error and no warning, which is indistinguishable from having configured nothing — the same shape of failure KEEL-354 was filed about. The paths are written out in full for the same reason: TOML does not expand `~`, and a command that cannot be found is skipped just as quietly.
+  
+  Every command in the section was run before it was written down, including `codex mcp add --help` to confirm `--url` exists at this version.
+
+  <sub>commit:f3240ec</sub>
 
 - **KEEL-357** Tidy the duplication this session's two fixes left in their own code — `done`
 
@@ -1505,6 +1515,14 @@ What has finished. What is happening now is in the tracker beside this file.
 | Date | Actor | Change |
 |---|---|---|
 | 2026-09-02 | claude | status in_progress → done |
+| 2026-09-02 | claude | evidence [] → ["commit:f3240ec"] |
+| 2026-09-02 | claude | close_reason none → done |
+| 2026-09-02 | claude | close_message none → (880 characters) |
+| 2026-09-02 | claude | status todo → in_progress |
+| 2026-09-02 | claude | claimed_by none → ses_864b193a-5582-4c58-bad7-f91398b0d3f8 |
+| 2026-09-02 | claude | claimed_at none → 2026-09-02T20:52:45.524064Z |
+| 2026-09-02 | claude | created task “The README only tells you how to install for Claude Code” |
+| 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (125 characters) |
 | 2026-09-02 | claude | close_reason none → done |
 | 2026-09-02 | claude | close_message none → (1039 characters) |
@@ -1696,14 +1714,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status todo → wont_do |
 | 2026-08-19 | claude | close_reason none → wont_do |
 | 2026-08-19 | claude | close_message none → (343 characters) |
-| 2026-08-19 | claude | status todo → wont_do |
-| 2026-08-19 | claude | close_reason none → wont_do |
-| 2026-08-19 | claude | close_message none → (253 characters) |
-| 2026-08-19 | claude | status todo → wont_do |
-| 2026-08-19 | claude | close_reason none → wont_do |
-| 2026-08-19 | claude | close_message none → (295 characters) |
-| 2026-08-19 | claude | revised feedback “A feature request needs somewhere to live that is not a task, and it should break into subtasks” to v1 |
-| 2026-08-19 | claude | created feedback “A feature request needs somewhere to live that is not a task, and it should break into subtasks” |
 
-*Showing the 200 most recent of 2674 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2682 changes. Use `specline_activity` for the rest.*
 
