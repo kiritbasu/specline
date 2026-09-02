@@ -172,19 +172,98 @@ fn session_start_in_an_unknown_directory_injects_one_paragraph() {
     );
 }
 
-/// The constraint that matters most: this runs before the human's first word.
+/// This test used to assert the bug.
+///
+/// It read `assert!(stdout.trim().is_empty())` and passed for as long as a
+/// session start against a dead daemon said nothing at all — which is what a
+/// user eventually reported as *"it currently fails silently"* (KEEL-354). A
+/// test that pins the wrong behaviour is worse than no test, because it makes
+/// the wrong behaviour look deliberate to whoever reads it next.
+///
+/// The constraint it was protecting is real and still asserted below: this runs
+/// before the human's first word, so it must never fail a session start. Exit 0
+/// was never the part that was wrong.
 #[test]
-fn session_start_is_silent_and_successful_when_no_daemon_answers() {
+fn session_start_says_the_daemon_is_down_rather_than_saying_nothing() {
     let dir = scratch();
     let (stdout, code) = run_hook(
         "session-start",
+        // Port 1 on loopback refuses immediately, so this is the
+        // connection-refused arm rather than a timeout.
         "http://127.0.0.1:1",
         r#"{"cwd":"/tmp/x","session_id":"abc123","source":"startup"}"#,
         dir.path(),
     );
 
     assert_eq!(code, 0, "a hook must never fail a session start");
-    assert!(stdout.trim().is_empty(), "{stdout}");
+
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON on stdout");
+    let context = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext is a string");
+
+    assert!(
+        context.contains("is not running"),
+        "it must name the cause it actually found: {context}"
+    );
+    assert!(
+        context.contains("specline-daemon"),
+        "a heads-up nobody can act on is half a heads-up: {context}"
+    );
+    assert!(
+        context.contains("Say so"),
+        "the model has to pass this on, or the human still never hears it: {context}"
+    );
+}
+
+/// A daemon that holds the port but cannot answer must not be reported as
+/// absent — that sends someone to start a process that is already up.
+#[test]
+fn session_start_separates_a_broken_daemon_from_a_missing_one() {
+    let dir = scratch();
+    let daemon = stub_daemon("this is not a digest", NO_EVENTS);
+
+    let (stdout, code) = run_hook(
+        "session-start",
+        &daemon,
+        r#"{"cwd":"/tmp/x","session_id":"abc123","source":"startup"}"#,
+        dir.path(),
+    );
+
+    assert_eq!(code, 0);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON on stdout");
+    let context = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext is a string");
+
+    assert!(context.contains("Something is listening"), "{context}");
+    assert!(
+        !context.contains("is not running"),
+        "something is holding the port, so this must not say nothing is: {context}"
+    );
+}
+
+/// The silence that is still correct.
+///
+/// A daemon that answers with nothing worth injecting stays quiet. The fix
+/// above must not turn every empty digest into a warning.
+#[test]
+fn session_start_stays_quiet_when_the_daemon_answers_with_nothing() {
+    let dir = scratch();
+    let daemon = stub_daemon(r#"{"summary":"   ","data":{"project":null}}"#, NO_EVENTS);
+
+    let (stdout, code) = run_hook(
+        "session-start",
+        &daemon,
+        r#"{"cwd":"/tmp/x","session_id":"abc123","source":"startup"}"#,
+        dir.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(
+        stdout.trim().is_empty(),
+        "an empty digest is not a failure and must not be announced: {stdout}"
+    );
 }
 
 #[test]

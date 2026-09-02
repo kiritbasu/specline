@@ -34,6 +34,7 @@
 //! starts with a stack trace, or cannot end because a bookkeeping hook is
 //! confused, is a far worse outcome than a missed record.
 
+use crate::writes::{Daemon, probe};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::Read;
@@ -45,6 +46,14 @@ use std::time::Duration;
 /// waiting for a reply. A local daemon answers in milliseconds; five seconds is
 /// three orders of magnitude of slack and still short enough that a wedged
 /// daemon is a pause rather than a hang.
+///
+/// **It shares a budget with something it cannot see.** `plugin/hooks/hooks.json`
+/// gives session start ten seconds, and Claude Code kills the hook at that
+/// point — a killed hook prints nothing, which is precisely the silence
+/// [`unreachable_notice`] exists to end. The slow path is this timeout *plus*
+/// `writes::PROBE_TIMEOUT`, so today it is five and one against a ceiling of
+/// ten. Raising either past nine reintroduces the bug through its own fix, and
+/// no test here would fail, because the budget lives in someone else's JSON.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How far back the Stop hook looks for this session's writes.
@@ -103,7 +112,10 @@ fn read_stdin() -> String {
 /// `GET {daemon}{path}` with the query, or `None` for anything that goes wrong.
 ///
 /// One place where a network answer becomes an `Option`, so no caller has to
-/// remember that a failed hook is a silent hook.
+/// remember that a failed answer is not an answer.
+///
+/// `None` used to mean "say nothing" at every call site, which is right for the
+/// Stop hook and was wrong for session start — see [`unreachable_notice`].
 fn get_json(daemon: &str, path: &str, query: &[(&str, &str)]) -> Option<Value> {
     let mut request = ureq::get(&format!("{}{path}", daemon.trim_end_matches('/')))
         .timeout(TIMEOUT)
@@ -196,10 +208,53 @@ fn session_start_context(body: &Value, claude_session: Option<&str>) -> Option<S
     Some(format!("{PREAMBLE}{hint}{digest}"))
 }
 
+/// What a session is told when the digest could not be fetched.
+///
+/// The silence this replaces was the whole of a user report — *"a heads-up when
+/// Specline isn't connected would help, since it currently fails silently"*. A
+/// session starting against a daemon that was down looked exactly like one
+/// starting against a daemon that was up: no orientation, no warning. So the
+/// model worked unoriented, and — the part that actually costs something —
+/// never ran the ritual that records anything. A failed write announces itself.
+/// A ritual that never fires is indistinguishable from a quiet day.
+///
+/// The sibling case has said its piece for a long time: the shim in
+/// `plugin/hooks/specline-hook.sh` tells a session when the *binary* is missing.
+/// This is the same sentence for the other cause, and it belongs here rather
+/// than there because a hook that reached the binary can name the address it
+/// tried and say why it failed.
+///
+/// Never returns `None`. Deciding there was nothing worth saying is what
+/// produced the bug.
+fn unreachable_notice(daemon: &str) -> String {
+    let base = daemon.trim_end_matches('/');
+
+    // Which of the three it is changes the advice, so it is worth the extra
+    // second on a path that has already failed. Telling someone to start a
+    // daemon that is already running sends them to fix the wrong thing.
+    let cause = match probe(base) {
+        Daemon::NotRunning => format!("Specline's daemon is not running at {base}"),
+        Daemon::Unknown(reason) => {
+            format!("Specline's daemon could not be reached at {base} ({reason})")
+        }
+        Daemon::Listening => {
+            format!("Something is listening at {base}, but it did not answer with a project digest")
+        }
+    };
+
+    format!(
+        "{cause}, so this session has no project context and the specline_* tools will not \
+         answer.\n\nSay so rather than working as though Specline were not installed: nothing \
+         this conversation decides or learns will be recorded until it is reachable. Start it \
+         with `specline-daemon`, or run /specline:setup to reinstall the agent that keeps it \
+         running."
+    )
+}
+
 /// Put the digest into the session before anything else does.
 ///
-/// Always exits 0. Prints nothing at all unless there is something worth
-/// injecting.
+/// Always exits 0. Prints nothing when the daemon answered and had nothing
+/// worth injecting — and says why when it did not answer at all.
 pub fn session_start(daemon: &str) {
     let payload = Payload::parse(&read_stdin());
 
@@ -213,16 +268,19 @@ pub fn session_start(daemon: &str) {
         return;
     }
 
-    let Some(body) = get_json(
+    let context = match get_json(
         daemon,
         "/api/context",
         &[("cwd", &payload.directory()), ("depth", "brief")],
-    ) else {
-        return;
-    };
-
-    let Some(context) = session_start_context(&body, payload.session_id.as_deref()) else {
-        return;
+    ) {
+        // A digest came back. It can still hold nothing worth injecting, and
+        // that silence is the deliberate one: a directory Specline has never
+        // heard of has nothing to say and should not spend context saying it.
+        Some(body) => match session_start_context(&body, payload.session_id.as_deref()) {
+            Some(context) => context,
+            None => return,
+        },
+        None => unreachable_notice(daemon),
     };
 
     // Printed as JSON rather than as bare text so the payload cannot be
@@ -362,6 +420,45 @@ pub fn stop(daemon: &str) {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    // --- what a session is told when the digest never arrives ---------------
+
+    /// The third arm, which the integration tests cannot reach.
+    ///
+    /// `hooks.rs` covers connection-refused and listening-but-broken by binding
+    /// real sockets. Reaching `Unknown` that way would need a dropped packet or
+    /// a DNS failure — machine-dependent, and this repository has twice shipped
+    /// a test that passed on a Mac and failed on Linux for exactly that kind of
+    /// reason. An address with no port fails in `socket_addr` before anything
+    /// touches the network, so it is the same branch without the coin toss.
+    #[test]
+    fn an_address_with_no_port_is_reported_as_unreachable_not_as_absent() {
+        let notice = unreachable_notice("http://127.0.0.1");
+
+        assert!(
+            notice.contains("could not be reached"),
+            "an address that cannot be parsed is not the same as nobody listening: {notice}"
+        );
+        assert!(
+            !notice.contains("is not running"),
+            "claiming the daemon is down would send someone to start one that may well be up: \
+             {notice}"
+        );
+    }
+
+    /// Every arm ends with something the reader can act on.
+    ///
+    /// The point of this function is that it is never silent, so the failure
+    /// worth guarding is an arm that says what went wrong and stops there.
+    #[test]
+    fn every_notice_says_what_to_do_about_it() {
+        for daemon in ["http://127.0.0.1:1", "http://127.0.0.1"] {
+            let notice = unreachable_notice(daemon);
+            assert!(notice.contains("specline-daemon"), "{daemon}: {notice}");
+            assert!(notice.contains("Say so"), "{daemon}: {notice}");
+            assert!(!notice.trim().is_empty(), "{daemon}");
+        }
+    }
 
     // --- payload parsing ----------------------------------------------------
 
