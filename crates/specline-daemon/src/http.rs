@@ -2172,13 +2172,6 @@ async fn api_entity(
 /// turns that id into "Codex 0.148". No argument lists the sessions that have
 /// written, most recently first, which is "what is talking to Specline".
 ///
-/// **`last_wrote`, not `connected`, and the field name is the point.** MCP over
-/// HTTP is stateless: there is no connection to report, so a caller rendering a
-/// green light would be inventing one — wrong for an editor quit an hour ago,
-/// and wrong again for one sitting idle mid-conversation. A name for this field
-/// that implied liveness would be a lie told once in the daemon and repeated by
-/// every surface that read it.
-///
 /// A session with no row is absent rather than defaulted. Three different
 /// things land there — a conversation older than the table, a transport that
 /// named no client, and one that never wrote — and all three are honestly
@@ -2191,12 +2184,12 @@ async fn api_clients(
 
     let store = state.store();
     let found = match params.get("session_id") {
-        Some(session_id) => store
-            .client_for_session(session_id)
-            .map(|one| one.into_iter().collect::<Vec<_>>()),
+        // One session, as a list of nought or one, so both arms answer in the
+        // same shape and the caller has one thing to parse either way.
+        Some(session_id) => store.client_for_session(session_id).map(Vec::from_iter),
+        // Ordered by last write, so a limit keeps what somebody is most likely
+        // to be looking at rather than an arbitrary slice.
         None => {
-            // Ordered by last write, so a limit keeps what somebody is most
-            // likely to be looking at rather than an arbitrary slice.
             let limit = params
                 .get("limit")
                 .and_then(|l| l.parse::<usize>().ok())
@@ -2208,20 +2201,7 @@ async fn api_clients(
 
     match found {
         Ok(clients) => {
-            let rows: Vec<Value> = clients
-                .iter()
-                .map(|c| {
-                    json!({
-                        "session_id": c.session_id,
-                        "name": c.client.name,
-                        "title": c.client.title,
-                        "version": c.client.version,
-                        "display_name": c.client.display_name(),
-                        "first_seen": c.first_seen,
-                        "last_wrote": c.last_seen,
-                    })
-                })
-                .collect();
+            let rows: Vec<Value> = clients.iter().map(client_row).collect();
             (
                 StatusCode::OK,
                 Json(json!({ "data": { "clients": rows, "total": rows.len() } })),
@@ -2230,6 +2210,30 @@ async fn api_clients(
         }
         Err(e) => internal_error(&e.to_string()),
     }
+}
+
+/// One client, as the wire describes it.
+///
+/// Its own function because the field names here are the API, and one of them
+/// is a decision rather than a transcription: the store calls it `last_seen`
+/// and this calls it **`last_wrote`**, because that is what it measures. A read
+/// does not move it, so an old value means "has not written lately" and never
+/// "has gone away" — and a surface that received `last_seen` would reasonably
+/// render a liveness dot from it, which MCP over HTTP cannot support.
+///
+/// `display_name` is derived rather than stored, and travels anyway so the rule
+/// for choosing between a title and a name is applied once here instead of
+/// separately by everything that renders one.
+fn client_row(client: &specline_core::SessionClient) -> Value {
+    json!({
+        "session_id": client.session_id,
+        "name": client.client.name,
+        "title": client.client.title,
+        "version": client.client.version,
+        "display_name": client.client.display_name(),
+        "first_seen": client.first_seen,
+        "last_wrote": client.last_seen,
+    })
 }
 
 /// A row's running commentary.
