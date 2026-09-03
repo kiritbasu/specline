@@ -75,7 +75,7 @@ base64 = "0.22"
 # English into 384 floats. It cost 3.4 GB of build tree and was the difference
 # between a machine with room on it and a build that died with `No space left
 # on device` (KEEL-348).
-fastembed = { version = "5", default-features = false, features = [
+fastembed = { version = "6", default-features = false, features = [
     "ort-download-binaries-native-tls",
     "hf-hub-native-tls",
 ] }
