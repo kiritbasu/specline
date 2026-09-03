@@ -1,13 +1,21 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-02T23:49:31Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-03T06:49:02Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (325)
+## Closed work (326)
+
+### 2026-09-03
+
+- **KEEL-369** Resolve the six open dependabot pull requests — `done`
+
+  All six open dependabot PRs merged. The three Cargo bumps (similar, fastembed, base64) were validated by real CI. The three apps/desktop bumps had no real CI coverage at all, so I ran typecheck, vitest, and vite build locally for each: the npm-minor-and-patch group and TypeScript 7 were clean, but vitest 4 broke tsc --noEmit on two test files because tsconfig.json's explicit types array never listed "node" and vitest 3 had been transitively leaking @types/node's globals into the program. Fixed by adding "node" to that array, verified clean with vitest 4 + TypeScript 7 + the npm group all together, then merged.
+
+  <sub>pr:https://github.com/kiritbasu/specline/pull/16 · pr:https://github.com/kiritbasu/specline/pull/17 · pr:https://github.com/kiritbasu/specline/pull/18 · pr:https://github.com/kiritbasu/specline/pull/19 · pr:https://github.com/kiritbasu/specline/pull/15 · pr:https://github.com/kiritbasu/specline/pull/14 · commit:275a41d</sub>
 
 ### 2026-09-02
 
@@ -1606,6 +1614,15 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-03 | claude | created task “CI never builds, typechecks, or tests the desktop app” |
+| 2026-09-03 | claude | status in_progress → done |
+| 2026-09-03 | claude | evidence [] → (324 characters) |
+| 2026-09-03 | claude | close_reason none → done |
+| 2026-09-03 | claude | close_message none → (617 characters) |
+| 2026-09-03 | claude | status todo → in_progress |
+| 2026-09-03 | claude | claimed_by none → ses_681b1236-48ff-499c-b0c9-ef07ccb63d08 |
+| 2026-09-03 | claude | claimed_at none → 2026-09-03T06:22:39.638424Z |
+| 2026-09-03 | claude | created task “Resolve the six open dependabot pull requests” |
 | 2026-09-02 | claude | status in_progress → done |
 | 2026-09-02 | claude | evidence [] → (82 characters) |
 | 2026-09-02 | claude | close_reason none → done |
@@ -1797,15 +1814,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_message none → (327 characters) |
 | 2026-08-19 | claude | status open → shipped |
 | 2026-08-19 | claude | shipped_at none → 2026-08-19T20:18:09Z |
-| 2026-08-19 | claude | created milestone “0.4.1 — a quieter rail, and the start of the signal lifecycle” |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T19:52:19.191523Z |
-| 2026-08-19 | claude | created task “A release reads like something a person wrote, and carries five files instead of fourteen” |
-| 2026-08-19 | claude | summary (385 characters) → (535 characters) |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (126 characters) |
-| 2026-08-19 | claude | close_reason none → done |
 
-*Showing the 200 most recent of 2756 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2765 changes. Use `specline_activity` for the rest.*
 
