@@ -7,6 +7,38 @@
 
 *Nothing here is decided. Do not build on any of it without saying so.*
 
+### A pure-Rust embedding runtime would unblock all three release targets. Swap it, and which one?
+
+`que_01M205H81B9AF36KTGASK9HQH2` · question · open · severity medium
+
+`que_01M024PJNA73RTC9TTNCXB30CE` closed with "Intel macOS and Linux come back when embeddings can be built out, which is a separate decision and not a build fix." This is that separate decision, arriving from an unexpected direction: there is a third route nobody costed, which is to keep embeddings in and drop the runtime that blocks the targets.
+
+## What is actually blocking
+
+Not vectors. `sqlite-vec` stores and searches them fine, and at 1,398 chunks it is already more index than the data needs. The block is `ort-sys`, the ONNX Runtime binding `fastembed` pulls in: `x86_64-apple-darwin` has no prebuilt binary at all, and the Linux build wants glibc 2.38 against a runner pinned at 2.35. ONNX decides which platforms can link, and everything downstream — the `embeddings` feature, the `--exclude specline-embed` line in the second clippy configuration, the one-target release matrix — exists to work around that one dependency.
+
+Worth saying plainly: semantic search is not merely off for two of three targets. The live store has no `vec0` table, so it is off here too. Nobody has ever run it.
+
+## The options
+
+**1. Keep `bge-small-en-v1.5`, swap `fastembed` for `candle-transformers`.** Candle has a BERT implementation, and BGE-small is a BERT — the model publishes `config.json`, `tokenizer.json` and `model.safetensors`, which is exactly what candle's own BERT example loads. Pure Rust on CPU by default; the CUDA and Accelerate backends are optional features. Same model means the same 384 dimensions, so no re-embedding, no schema migration, no change in retrieval quality. Costs a dependency tree that is large but Rust all the way down.
+
+**2. Same, but `tract-onnx` instead.** Runs the model's existing ONNX export in pure Rust. Smaller and more self-contained than candle, and it keeps the exact graph `fastembed` runs today. Less certain than option 1 that BERT-with-pooling loads without work, because tract's coverage of ONNX operators is good but not total.
+
+**3. Move to a Model2Vec static model.** No neural runtime at all — a static embedding is a token-to-vector lookup plus mean pooling, and `model2vec-rs` is the official Rust implementation. The smallest possible dependency. But it changes the vector dimension to 256 or 512, which means a `vec0` rebuild and a schema migration, and static embeddings are measurably weaker on retrieval than a transformer. That may not matter fused with BM25 over 1,400 short chunks, but "may not" is this project's cue for a measurement rather than an assumption.
+
+**4. Leave it. Embeddings stay off, arm64 stays the only target.** No work, and keyword search covers every artifact — which is the documented degradation and has been true in practice for weeks without anyone noticing.
+
+## Recommendation
+
+**Option 1, with a spike before committing.** It is the only one that removes the constraint without touching stored data or retrieval quality, and if it works it deletes three separate workarounds rather than adding a fourth. The spike is small and decisive: load the model in candle, embed a dozen strings, and check the vectors match what `fastembed` produces for the same input to within floating-point noise. If they do, everything else follows; if they do not, option 2 is the next thing to try and option 3 after that.
+
+Not doing this myself, because it is reversible as a library choice but not as a release decision — it changes which platforms ship, and that was settled as yours.
+
+## The one thing to weigh against it
+
+Option 4 is not obviously wrong. Semantic search has never run here, and nobody has missed it. If the honest answer is that keyword search is enough for one user and a few thousand rows, then the right move is to say so and take embeddings out entirely — which would delete more code than any of the other three options add.
+
 ### Does a Mac app become the front door for other editors, and does it own the daemon?
 
 `que_01M1HQQZE3PCWMVM7MH822FGFF` · question · open · severity medium

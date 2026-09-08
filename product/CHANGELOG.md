@@ -1,13 +1,21 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-03T06:49:02Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T09:28:19Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (326)
+## Closed work (327)
+
+### 2026-09-08
+
+- **KEEL-376** Evaluate the zvec libraries against Specline's search and embedding stack — `done`
+
+  Looked at all nine zvec repos. None is worth adopting: the vector database solves a problem Specline does not have at 1,398 chunks, and adopting it would cost the static single-file release artifact and a second store outside the SQLite backup. The useful thing was indirect — zvec-grep's model catalogue showed that local embedding runs on runtimes that are not ONNX, which points at the dependency actually blocking two of three release targets. Filed as a question rather than acted on, because it changes which platforms ship.
+
+  <sub>doc:que_01M205H81B9AF36KTGASK9HQH2 · url:https://github.com/zvec-ai</sub>
 
 ### 2026-09-03
 
@@ -1614,6 +1622,21 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-08 | claude | status in_progress → done |
+| 2026-09-08 | claude | evidence [] → ["doc:que_01M205H81B9AF36KTGASK9HQH2","url:https://github.com/zvec-ai"] |
+| 2026-09-08 | claude | close_reason none → done |
+| 2026-09-08 | claude | close_message none → (530 characters) |
+| 2026-09-08 | claude | revised question “A pure-Rust embedding runtime would unblock all three release targets. Swap it, and which one?” to v1 |
+| 2026-09-08 | claude | created question “A pure-Rust embedding runtime would unblock all three release targets. Swap it, and which one?” |
+| 2026-09-08 | claude | status todo → in_progress |
+| 2026-09-08 | claude | claimed_by none → ses_a0b4dc78-9f6d-4441-bb5a-13c4fb31fdac |
+| 2026-09-08 | claude | claimed_at none → 2026-09-08T09:26:47.261235Z |
+| 2026-09-08 | claude | created task “Evaluate the zvec libraries against Specline's search and embedding stack” |
+| 2026-09-03 | human | created task “use simple technical english for everything” |
+| 2026-09-03 | human | created task “delete/archive projects” |
+| 2026-09-03 | human | created task “desktop tray app for status” |
+| 2026-09-03 | human | created task “Roadmaps don't get autoupdated” |
+| 2026-09-03 | human | created task “Stronger instructions about specline in claude.md or equiv” |
 | 2026-09-03 | claude | created task “CI never builds, typechecks, or tests the desktop app” |
 | 2026-09-03 | claude | status in_progress → done |
 | 2026-09-03 | claude | evidence [] → (324 characters) |
@@ -1799,21 +1822,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (258 characters) |
 | 2026-08-19 | human | revised spec “Specline — standing instructions” to v17 |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_e1aa5ce8-c196-4c0e-8882-d4422009c9f4 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T20:21:17.551450Z |
-| 2026-08-19 | claude | unlinked “Phase 14 — Feature requests: the Inbox and the lifecycle” blocks “Cut 0.4.1 — the rail without its shortcuts, and the signal…” |
-| 2026-08-19 | claude | created task “Write the release-row-then-tag loop into the standing contract” |
-| 2026-08-19 | claude | status todo → done |
-| 2026-08-19 | claude | evidence [] → (112 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (279 characters) |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (151 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (327 characters) |
-| 2026-08-19 | claude | status open → shipped |
-| 2026-08-19 | claude | shipped_at none → 2026-08-19T20:18:09Z |
 
-*Showing the 200 most recent of 2765 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2780 changes. Use `specline_activity` for the rest.*
 
