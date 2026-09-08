@@ -7,6 +7,52 @@
 
 *Nothing here is decided. Do not build on any of it without saying so.*
 
+### Sessions start well and stop writing partway through. What actually fixes that, and is a hook the lever?
+
+`que_01M2089GJYCPVQQBMFRH4E1FGD` · question · open · severity medium
+
+KB raised this after reading about "Claude Code Function Hooks" and asking whether they would help. Two separate things, and the second one is real.
+
+## The feature is not shipped, and this should not wait on it
+
+Function Hooks are `anthropics/claude-code` issue #91870 — **open**, filed 2026-09-03 by a community member, labelled `enhancement`, 139 comments. Popular, not announced. No flag, no build, no Anthropic commitment. The article describing them says so itself.
+
+What does exist today, and is easy to confuse with it: the **Agent SDK** has in-process TypeScript hooks. That is a different product from the Claude Code CLI, and it is not the surface Specline plugs into.
+
+More to the point, **the events we would want already exist**. `PreToolUse` and `PostToolUse` fire mid-session today, as shell commands. Nothing about the current hook system stops Specline noticing that a session has been editing files for forty minutes without touching a row. We are not blocked on a feature; we have not tried the thing that is already there.
+
+## What is real, and what the gate never measured
+
+The failure KB describes is documented in the contract, with a timestamp: a session on 2026-08-15 claimed its task at 20:02, closed it at 20:18, then spent forty-four minutes cutting a release and building a feature against no row at all — four of six commits landing while the board sat idle.
+
+The gate does not contradict this, because it never looked. It asked "will an agent write to Specline unprompted at all" and answered 18 of 20. Its own summary says what was left over: *"What remained was precision, which the gate could not see at all."* Writing once in a session scores the same as writing throughout it.
+
+This session is another instance. It read the digest at minute zero, created its first task row only after being prompted to, and filed a question that overlapped KEEL-349's territory — because the digest carries the project state but not the skill, and nothing loaded `SKILL.md`.
+
+## The options
+
+**1. Nothing. The tools are there and the instructions are written.** Defensible: the last measurement said the agent does write, and this may be one user's impression rather than a trend.
+
+**2. A mid-session hook, built today on `PreToolUse`/`PostToolUse`.** Notice a session that has edited N files with no open claim and say so once. Available now, no waiting. The risk is that it fires constantly and gets tuned out, which is the failure mode of every nagging tool.
+
+**3. Wait for Function Hooks.** Typed, in-process, no shell spawn per event. The one genuine advantage over option 2 is failure visibility: the `PostToolUse` hook this project deleted failed *silently* for its whole life because it called a renamed command and swallowed the error. A typed in-process hook surfaces that. But it is an open issue with no date.
+
+**4. Move more of the ritual from instruction to tool.** This is the lever that has actually worked here, twice, with numbers behind it. `specline_claim` exists because "across sixty-six tasks the number of transitions into `in_progress` before work began was zero" while it was an instruction. `specline_next` exists for the same reason. The pattern is consistent: what a session is *told* to remember decays, what it can *call* gets called.
+
+## Recommendation
+
+**4, and then 2 as an experiment — not 3.**
+
+Option 4 first because it is the only one with evidence behind it in this repository, and because the current gap has a shape that suits it: the thing sessions fail to do mid-flight is notice that the work has changed and file a new row. That is a judgement, and judgements are what a well-described tool gets right more often than a remembered rule.
+
+Option 2 second, scoped narrowly, and measured before it is kept — one nudge per session at most, on a real signal like edits-without-a-claim, off by default until a run says it changes behaviour. This project has a harness for exactly that measurement and it is frozen rather than deleted.
+
+Not option 3, because it makes a real problem wait on somebody else's roadmap when the events are already available. If Function Hooks ship, option 2's hook is reimplemented against a better API — the design work is not wasted either way.
+
+## The thing worth deciding first
+
+Whether this is worth measuring at all before building anything. The gate cost seven runs and 11,700 words for one number, and was frozen because that was the wrong price for this project's size. A cheaper version of the same question — how many of the last thirty sessions wrote a row after their first thirty minutes — is answerable from the event log with a query rather than a harness, and would say whether this is a trend or an impression.
+
 ### A pure-Rust embedding runtime would unblock all three release targets. Swap it, and which one?
 
 `que_01M205H81B9AF36KTGASK9HQH2` · question · open · severity medium
