@@ -425,12 +425,12 @@ else
     done
 
     # Ask the daemon what it can do rather than reporting what we asked for.
-    # Every *released* binary is built without the embedding model — no
-    # prebuilt ONNX Runtime exists for Intel macOS, so the release ships the
-    # feature off on all three platforms (KEEL-252, KEEL-349). Printing
-    # "Embeddings on" at somebody who has just downloaded one would be this
-    # script promising a capability the binary does not have, which is worse
-    # than the capability being absent.
+    # Released binaries carry the model again since KEEL-377, so this is now
+    # true of both a download and a source build — but `embeddings` is still a
+    # feature and a build without it still exists. Printing "Embeddings on" at
+    # somebody whose binary has none would be this script promising a
+    # capability that is not there, which is worse than the capability being
+    # absent.
     case "$health" in
         *'"built_in":true'*|*'"built_in": true'*) EMBEDDINGS_BUILT_IN=true ;;
         *) EMBEDDINGS_BUILT_IN=false ;;
@@ -481,15 +481,14 @@ printf '  \033[1mRestart Claude Code now.\033[0m MCP servers are connected at st
 printf '  and nothing was listening when this session began — so the specline_* tools\n'
 printf '  will not appear until you do.\n\n'
 
-# Said plainly, and only to the person it is true of. A downloaded binary
-# cannot do this at all, and finding that out from a thin search result later
-# is the version that costs trust.
+# Said plainly, and only to the person it is true of. Finding out from a thin
+# search result later is the version that costs trust.
 if [ "$EMBEDDINGS_BUILT_IN" = false ]; then
-    printf '  \033[1mThis build searches by keyword only.\033[0m Released binaries carry no\n'
-    printf '  embedding model: the ONNX runtime it needs has no build for Intel macOS,\n'
-    printf '  so the release ships without it on every platform. Every artifact is still\n'
-    printf '  searchable, and a search tells you which halves of it ran. Building from\n'
-    printf '  source is the way to get the other half today.\n\n'
+    printf '  \033[1mThis build searches by keyword only.\033[0m It was built without the\n'
+    printf '  `embeddings` feature, which the released binary now carries — so this is a\n'
+    printf '  source build with the feature turned off rather than a limitation of\n'
+    printf '  Specline. Every artifact is still searchable, and a search tells you which\n'
+    printf '  halves of it ran. Rebuild with default features for the other half.\n\n'
 elif [ "$EMBEDDINGS" = false ]; then
     printf '  Search will be keyword-only. For meaning as well as words, re-run\n  without --no-embeddings (the first start downloads a 127 MB model).\n\n'
 fi

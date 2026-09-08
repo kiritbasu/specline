@@ -342,7 +342,8 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
             format!(
                 "not built into this binary, so search is keyword-only by construction — \
                  {without} of {current} current document(s) have no vector and nothing here \
-                 can add one"
+                 can add one. A released binary carries the model; this one was built \
+                 without default features"
             ),
         )
     } else if current == 0 {
