@@ -1,6 +1,6 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T10:16:27Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T10:35:27Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
@@ -1628,6 +1628,8 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-08 | claude | “A session that never writes leaves no trace, so nothing can…” blocks “Sessions start well and stop writing partway through. What…” |
+| 2026-09-08 | claude | created task “A session that never writes leaves no trace, so nothing can measure whether sessions keep using Specline” |
 | 2026-09-08 | claude | revised question “Sessions start well and stop writing partway through. What actually fixes that, and is a hook the lever?” to v1 |
 | 2026-09-08 | claude | created question “Sessions start well and stop writing partway through. What actually fixes that, and is a hook the lever?” |
 | 2026-09-08 | claude | status in_progress → done |
@@ -1826,8 +1828,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | close_message none → (517 characters) |
 | 2026-08-19 | claude | created task “Put semantic search in a released binary, by loading the ONNX runtime instead of linking it” |
 | 2026-08-19 | claude | revised decision “Semantic search is on unless you turn it off, and the model arrives without being asked for” to v1 |
-| 2026-08-19 | claude | created decision “Semantic search is on unless you turn it off, and the model arrives without being asked for” |
-| 2026-08-19 | claude | created task “Stop building an AV1 encoder in order to embed text” |
 
-*Showing the 200 most recent of 2796 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2798 changes. Use `specline_activity` for the rest.*
 
