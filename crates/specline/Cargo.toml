@@ -41,26 +41,30 @@ path = "src/bin/specline-daemon.rs"
 # otherwise. The opt-in is per-package and there is no workspace-level form.
 dist = true
 
-# **Every released binary is built without embeddings** (KEEL-252, and KEEL-220
-# for why it is possible at all).
+# **Released binaries carry embeddings**, and there is no `default-features`
+# line here on purpose. This used to say the opposite, and the line that changed
+# is not in this file — it is the target list in `dist-workspace.toml`.
 #
-# The ONNX runtime `fastembed` pulls has no prebuilt Intel macOS library and
-# wants a newer glibc than the Linux binaries are built against, so two of three
-# targets could not link while it was in the graph. This is what takes it out.
+# The history, because deleting it would make the current state look obvious
+# when it was not. `ort` links a prebuilt ONNX Runtime at build time, there has
+# never been one for Intel macOS, and the Linux one wants a newer glibc than the
+# release floor. So two of three targets could not link while `specline-embed`
+# was in the graph, and `default-features = false` took it out of all three —
+# `dist build` takes `--target` and not `--features`, so there was no way to say
+# "arm64 with embeddings, the others without" (KEEL-252, KEEL-220).
 #
-# It applies to all three rather than only the two that need it, because `dist
-# build` takes `--target` and not `--features` and `[package.metadata.dist]` is
-# per package: there is no configuration expressing "arm64 with embeddings, the
-# others without". Given a choice between three platforms with keyword search
-# and one platform that could also do semantic search, three wins — the released
-# binary already defaults `--embeddings` off, and `specline doctor` and `/api/health`
-# both say which build you have.
+# That was a trade: three platforms with keyword search over one that could also
+# search by meaning. It was the right call with no download data. There is data
+# now — 14 arm64 archives against 2 apiece for the other two, and those twos
+# match the `.sha256` counts exactly, which is what the release process touching
+# its own artifacts looks like rather than a person. Nobody was on the platforms
+# the trade bought (KEEL-377).
 #
-# What it costs is real and worth stating: no released binary can do semantic
-# search at all. It survives for anyone building from source, where the feature
-# is on by default. It comes back for everyone if the ONNX prebuilt situation
-# changes, or if someone builds the second release path route 2 describes.
-default-features = false
+# So the release ships one target and that target links ONNX perfectly well. If
+# a second target ever comes back, this constraint comes back with it and
+# `dist-workspace.toml` is where the conflict will show up first — the release
+# will fail to link rather than quietly ship without embeddings, which is the
+# failure mode worth having.
 
 [lints]
 workspace = true

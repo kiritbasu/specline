@@ -74,22 +74,26 @@ ci = ["github"]
 # hooks cannot run there, so shipping it would mean either a binary nobody has
 # ever executed or a product that looks whole and is half-wired. It comes back
 # when someone asks, with test coverage from the first commit (§10).
-# **Three again, since KEEL-252.** The `ort-sys` failures below were real and are
-# now avoided rather than worked around: `[package.metadata.dist] default-features
-# = false` in `crates/specline/Cargo.toml` takes the ONNX runtime out of the release
-# build entirely, so every one of these links. The comment above is kept because
-# it is the reason this list was ever one item, and because the constraint it
-# describes has not gone away — it is only no longer in the way.
+# **One again, and this time by choice rather than by failure** (KEEL-377).
 #
-# `x86_64-unknown-linux-gnu` builds on `ubuntu-22.04`, never `ubuntu-latest`: the
-# glibc a binary links against is a floor rather than a preference, and built on
-# a newer image it refuses to start on anything older with a message that reads
-# like a corrupt download.
-targets = [
-  "aarch64-apple-darwin",
-  "x86_64-apple-darwin",
-  "x86_64-unknown-linux-gnu",
-]
+# It went to three when `[package.metadata.dist] default-features = false` took
+# the ONNX runtime out of the release build, so the `ort-sys` failures above
+# stopped applying. The cost was that no released binary could search by
+# meaning, and the trade was made blind: three platforms with keyword search
+# looked better than one with both, because nobody knew who was on them.
+#
+# Nobody was. Across every release the other two archives were downloaded twice
+# each, matching their `.sha256` counts exactly — the release process touching
+# its own artifacts, not a person. arm64 was downloaded 14 times. So the list
+# goes back to the one target that has ever been used, and `crates/specline/Cargo.toml`
+# drops the line that was buying the other two.
+#
+# The `ort-sys` constraint above has still not gone away, and it is load-bearing
+# again: adding a target here without solving it will fail the release at the
+# link step. That is the right failure. The route that would reach all three is
+# KEEL-349 — load the runtime at execution time instead of linking it — and it is
+# open rather than done.
+targets = ["aarch64-apple-darwin"]
 
 # Shell only. There is no PowerShell installer because there is no Windows
 # target, and shipping one would advertise a platform we do not build.

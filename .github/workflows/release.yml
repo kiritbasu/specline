@@ -81,31 +81,33 @@ jobs:
           # like a run that never starts.
           - target: aarch64-apple-darwin
             runner: '["self-hosted", "macOS", "ARM64"]'
-          # Intel macOS and Linux were removed when 0.1.0 was cut, because both
-          # failed on `ort-sys` — the ONNX Runtime binding `fastembed` pulls in.
-          # `ort` downloads a prebuilt static library rather than compiling one,
-          # so ONNX decided which platforms could link: no Intel macOS prebuilt
-          # exists at all, and the Linux one wants glibc 2.38 against a runner
-          # deliberately pinned to 2.35 to keep the floor low.
+          # **Intel macOS and Linux are not built, and this is the second time
+          # they have come off.** The first was `ort-sys`: no Intel macOS
+          # prebuilt exists and the Linux one wants glibc 2.38 against a runner
+          # pinned to 2.35. They came back when `default-features = false` took
+          # embeddings out of the release build, which made them link at the
+          # price of no released binary being able to search by meaning.
           #
-          # **They are back because the dependency is gone from the release
-          # build**, not because anything about ONNX changed:
-          # `[package.metadata.dist] default-features = false` builds every
-          # target without embeddings (KEEL-220, KEEL-252). The cost is that no
-          # released binary can do semantic search; `specline doctor` says so.
+          # They come off now because that price was paid to nobody — 2
+          # downloads each across every release, matching their `.sha256`
+          # counts, against 14 for arm64 (KEEL-377). One target that can do
+          # everything beats three that cannot, when the three have no users.
           #
-          # Intel macOS builds on the same self-hosted Apple Silicon Mac.
+          # Adding either one back means solving `ort-sys` first, and the
+          # release will fail at the link step if it is not solved. KEEL-349 is
+          # the route: load the runtime at execution time rather than linking
+          # it, which would carry the feature onto all three.
+          #
+          # Two things whoever does that will need, kept here because they were
+          # learned the expensive way and the entries that carried them are
+          # gone. Intel macOS builds on the same self-hosted Apple Silicon Mac:
           # `--target=x86_64-apple-darwin` on an arm64 host still links with
-          # `cc` and still gets the ad-hoc signature, which is the requirement —
-          # Apple's linker, not Apple's hardware.
-          - target: x86_64-apple-darwin
-            runner: '["self-hosted", "macOS", "ARM64"]'
-          # `ubuntu-22.04`, never `ubuntu-latest`. The glibc a binary links
-          # against is a floor rather than a preference: built on a newer image
-          # it refuses to start on anything older, with a message that reads
-          # like a corrupt download.
-          - target: x86_64-unknown-linux-gnu
-            runner: '"ubuntu-22.04"'
+          # `cc` and still gets the ad-hoc signature, and the requirement is
+          # Apple's linker rather than Apple's hardware. Linux builds on
+          # `ubuntu-22.04` and never `ubuntu-latest`: the glibc a binary links
+          # against is a floor rather than a preference, and built on a newer
+          # image it refuses to start on anything older with a message that
+          # reads like a corrupt download.
     steps:
       - uses: actions/checkout@v7
 
