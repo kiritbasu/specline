@@ -1,6 +1,6 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T09:28:19Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T09:39:54Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
@@ -1622,6 +1622,7 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-08 | claude | “Put semantic search in a released binary, by loading the…” references “A pure-Rust embedding runtime would unblock all three…” |
 | 2026-09-08 | claude | status in_progress → done |
 | 2026-09-08 | claude | evidence [] → ["doc:que_01M205H81B9AF36KTGASK9HQH2","url:https://github.com/zvec-ai"] |
 | 2026-09-08 | claude | close_reason none → done |
@@ -1821,7 +1822,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | evidence [] → ["commit:9a0b607","doc:spc_01KZKSME2TCPVARX9M04836XD6"] |
 | 2026-08-19 | claude | close_reason none → done |
 | 2026-08-19 | claude | close_message none → (258 characters) |
-| 2026-08-19 | human | revised spec “Specline — standing instructions” to v17 |
 
-*Showing the 200 most recent of 2780 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2781 changes. Use `specline_activity` for the rest.*
 
