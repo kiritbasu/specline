@@ -1,15 +1,21 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T09:39:54Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T10:01:17Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (327)
+## Closed work (328)
 
 ### 2026-09-08
+
+- **KEEL-378** Work out whether Specline's setup can become a one-command install per editor, the way zvec-grep's is — `done`
+
+  Yes, we can, and the design already exists: it is option 3 of the open question about how other editors get connected — a `specline connect` verb in Rust. zvec-grep is a working reference for the shape, and the technique worth stealing is the managed block marker, which answers the objection in install.sh about never editing somebody's settings. The gap it closes is Codex, which today takes six steps and two hand-edits against one command.
+
+  <sub>doc:que_01M1HQQZE3PCWMVM7MH822FGFF · url:https://github.com/zvec-ai/zvec-grep/blob/main/docs/01-agents.md</sub>
 
 - **KEEL-376** Evaluate the zvec libraries against Specline's search and embedding stack — `done`
 
@@ -1622,6 +1628,19 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-08 | claude | status in_progress → done |
+| 2026-09-08 | claude | evidence [] → (109 characters) |
+| 2026-09-08 | claude | close_reason none → done |
+| 2026-09-08 | claude | close_message none → (443 characters) |
+| 2026-09-08 | claude | “Work out whether Specline's setup can become a one-command…” references “Does a Mac app become the front door for other editors, and…” |
+| 2026-09-08 | claude | status todo → in_progress |
+| 2026-09-08 | claude | claimed_by none → ses_a0b4dc78-9f6d-4441-bb5a-13c4fb31fdac |
+| 2026-09-08 | claude | claimed_at none → 2026-09-08T09:55:54.310160Z |
+| 2026-09-08 | claude | created task “Work out whether Specline's setup can become a one-command install per editor, the way zvec-grep's is” |
+| 2026-09-08 | claude | status todo → in_progress |
+| 2026-09-08 | claude | claimed_by none → ses_a0b4dc78-9f6d-4441-bb5a-13c4fb31fdac |
+| 2026-09-08 | claude | claimed_at none → 2026-09-08T09:43:58.743023Z |
+| 2026-09-08 | claude | created task “Drop the release to arm64 and put semantic search back in the binary” |
 | 2026-09-08 | claude | “Put semantic search in a released binary, by loading the…” references “A pure-Rust embedding runtime would unblock all three…” |
 | 2026-09-08 | claude | status in_progress → done |
 | 2026-09-08 | claude | evidence [] → ["doc:que_01M205H81B9AF36KTGASK9HQH2","url:https://github.com/zvec-ai"] |
@@ -1809,19 +1828,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | created task “Stop building an AV1 encoder in order to embed text” |
 | 2026-08-19 | claude | status todo → in_progress |
 | 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T20:33:42.838781Z |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → (97 characters) |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (480 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T20:28:21.763078Z |
-| 2026-08-19 | claude | created task “Run the daily-driver daemon with embeddings, and backfill the documents that have no vector” |
-| 2026-08-19 | claude | status in_progress → done |
-| 2026-08-19 | claude | evidence [] → ["commit:9a0b607","doc:spc_01KZKSME2TCPVARX9M04836XD6"] |
-| 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (258 characters) |
 
-*Showing the 200 most recent of 2781 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2794 changes. Use `specline_activity` for the rest.*
 
