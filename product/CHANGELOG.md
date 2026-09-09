@@ -1,13 +1,27 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-09T09:48:17Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-09T09:48:53Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
 
 ---
 
-## Closed work (328)
+## Closed work (330)
+
+### 2026-09-09
+
+- **KEEL-380** Rewrite the README: status badges, collapsible install sections, and plain technical English — `done`
+
+  README rewritten and committed with two new homes for what came out of it. 572 lines to 308, with docs/INSTALL.md created for the Codex walkthrough, running two editors, service management and uninstalling, and CONTRIBUTING.md given the build-from-source content it lacked. Badge bar, the Codex section collapsed, the tagline and opening paragraph KB chose, and a worked example showing one sentence beside the decision it produced. The prose tells a three-reviewer panel identified — 47 justifying tails, 11 mirrored clauses, 5 copular padding constructions — are removed. Rendered length barely moved, 299 to 285, which is honest arithmetic: half the old file was hidden inside details blocks rather than cut.
+
+  <sub>commit:f5e62b3 · doc:tsk_01M22QZAXNJ7S5BTN2HNDY4Y80</sub>
+
+- **KEEL-381** The README tells users to symlink a pre-commit hook that only exists in this repository — `done`
+
+  Fixed during the README rewrite, since the section was being rewritten anyway. The symlink to `scripts/pre-commit` is gone; the README now prints a two-line `.git/hooks/pre-commit` calling `specline generate <project> --check`, which needs no file from us and works in any repository. That flag already existed and its help text names this exact use.
+
+  <sub>commit:f5e62b3</sub>
 
 ### 2026-09-08
 
@@ -1628,6 +1642,14 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-09 | claude | status in_progress → done |
+| 2026-09-09 | claude | evidence [] → ["commit:f5e62b3","doc:tsk_01M22QZAXNJ7S5BTN2HNDY4Y80"] |
+| 2026-09-09 | claude | close_reason none → done |
+| 2026-09-09 | claude | close_message none → (711 characters) |
+| 2026-09-09 | claude | status todo → done |
+| 2026-09-09 | claude | evidence [] → ["commit:f5e62b3"] |
+| 2026-09-09 | claude | close_reason none → done |
+| 2026-09-09 | claude | close_message none → (350 characters) |
 | 2026-09-09 | claude | created task “The README tells users to symlink a pre-commit hook that only exists in this repository” |
 | 2026-09-09 | claude | status todo → in_progress |
 | 2026-09-09 | claude | claimed_by none → ses_a0b4dc78-9f6d-4441-bb5a-13c4fb31fdac |
@@ -1820,14 +1842,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | status in_progress → done |
 | 2026-08-19 | claude | evidence [] → (125 characters) |
 | 2026-08-19 | claude | close_reason none → done |
-| 2026-08-19 | claude | close_message none → (628 characters) |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T21:00:41.082790Z |
-| 2026-08-19 | claude | status todo → in_progress |
-| 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
-| 2026-08-19 | claude | claimed_at none → 2026-08-19T21:00:39.131485Z |
-| 2026-08-19 | claude | created task “Embeddings on by default, and the backlog embedded without anyone asking” |
 
-*Showing the 200 most recent of 2803 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2811 changes. Use `specline_activity` for the rest.*
 
