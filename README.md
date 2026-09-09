@@ -1,76 +1,84 @@
+<div align="center">
+
+<img src="docs/images/logo.png" width="120" alt="Specline" />
+
 # Specline
 
-Specline stores everything about a software project except the code: the specs,
-the decisions, the tasks, the open questions, the feedback. It runs on your
-machine. Claude Code and Codex read and write it through
-[MCP](https://modelcontextprotocol.io) while you work, and an app shows you what
-is in there.
+**A local issue tracker built for long-horizon work with AI agents.**
+
+[![CI](https://github.com/kiritbasu/specline/actions/workflows/ci.yml/badge.svg)](https://github.com/kiritbasu/specline/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kiritbasu/specline?color=blue)](https://github.com/kiritbasu/specline/releases/latest) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Platform](https://img.shields.io/badge/platform-macOS%20arm64-lightgrey.svg)](#requirements)
+
+[Install](#install) · [Using it](#using-it) · [What is in it](#what-is-in-it) · [Full install guide](docs/INSTALL.md) · [Architecture](docs/ARCHITECTURE.md) · [CLI](docs/CLI.md)
+
+</div>
 
 ---
 
-## The problem
-
-Two things go wrong when you build software with an AI agent.
-
-**You explain the project again every session.** What it is, what you decided
-last week, why the obvious approach does not work, what is half-finished. Claude
-is good at the work and starts each session knowing none of it.
-
-**Decisions do not survive the conversation.** You spend forty minutes working
-out that the queue has to be idempotent because retries are at-least-once. You
-agree, the code gets written, and the reason is nowhere. Six months later you
-find the code, cannot remember why it is like that, and either work it out again
-or break it.
-
-Writing things down is the obvious fix. In practice that means a wiki nobody
-updates, a `NOTES.md` that is stale in a fortnight, or an issue tracker built for
-teams of thirty. They fail the same way: updating them is a separate job from
-doing the work, so it does not get done.
-
-## What Specline does
-
-Claude writes to Specline as you work, in the same conversation. There is no
-second step and nothing to remember.
-
-- You mention a constraint. It becomes a **decision**, with your reasoning.
-- You say "we should probably…". It becomes a **task**.
-- Something turns out to be undecided. It becomes an **open question**, and later sessions see it before they argue it out again.
-- Claude works out why something is slow. That goes on the task as a **note**, tagged with the conversation it came from.
-
-The next session reads the store first and knows where things stand.
+Specline stores and organises everything about a long-running AI development
+project: specs, PRDs, roadmaps, tasks and feature requests. You work with Claude
+Code or Codex the way you already do, and Specline records it as you go.
 
 ![The project overview: open work, questions and risks, recent decisions](docs/images/overview.png)
 
-**Your data stays put.** Everything is in `~/.specline` on your disk. No
-account, no cloud, no telemetry. The daemon listens on `127.0.0.1` and nothing
-else can reach it.
+## The problem
 
-**You get readable files.** Specline writes markdown into your repository, so
-it is greppable, diffable, and committed alongside your code. If Specline went
-away tomorrow you would still have the files.
+Two things go wrong on a project that runs for months with an AI agent. An agent
+opens every conversation without the project's history, so you supply it again.
+And the reasoning behind a decision does not survive the conversation it happened
+in, which is the part you need six months later when something has to change.
+
+Writing it down is the obvious answer, and it means a wiki, a `NOTES.md`, or a
+tracker built for a team of thirty. All three go stale for the same reason:
+keeping them current is a separate job from the work, so it is the job that gets
+dropped.
+
+## What Specline does
+
+Claude writes to Specline as you work, in the same conversation, so there is no
+second step to remember.
+
+| You do this | Specline gets |
+|---|---|
+| mention a constraint | a **decision**, with your reasoning |
+| say "we should probably…" | a **task** |
+| leave something undecided | an **open question**, which later sessions see before they argue it out again |
+| work out why something is slow | a **note** on the task, tagged with the conversation it came from |
+
+The next session reads the store before it reads anything else.
+
+**Your data stays on your disk.** Everything lives in `~/.specline`, with no
+account and no cloud behind it. The daemon listens on `127.0.0.1`, so nothing off
+your machine can reach it. One thing does leave: the daemon checks for a new
+release every half hour, sending nothing from your store and installing nothing
+without you agreeing to the restart. `--no-update-check` at install time or
+`SPECLINE_AUTO_UPDATE=0` afterwards turns that off, and then Specline makes no
+network requests at all.
+
+**You get readable files.** Specline writes markdown into your repository, where
+you can grep it and diff it and commit it beside the code it describes. If
+Specline went away tomorrow, the files would still be there.
 
 ### What it is not
 
-- A team tracker. One person, one machine, no permissions, no assignees.
+- A team tracker. One person, one machine, no permissions and no assignees.
 - A replacement for GitHub Issues if your team already uses them.
-- A note-taking app. You can file and close things yourself, but Claude writes the reasoning, in the conversation where it came up.
-- A chat log. It keeps what turned out to be true, not what was said.
+- A note-taking app. You can file and close things yourself, but Claude writes the
+  reasoning, in the conversation where it came up.
+- A chat log. It keeps what turned out to be true.
 
 ---
 
 ## Install
 
-Specline runs as one local daemon that every client talks to over HTTP, so
-installing it is two jobs: get the daemon running, then tell your editor where
-it is. [Claude Code](https://claude.com/claude-code) does both in three
-commands. [Codex](https://developers.openai.com/codex) does the first the same
-way and the second by hand.
+### Requirements
+
+**macOS on Apple Silicon.** Intel Macs and Linux build from source; the released
+binary is arm64 only, for the reason in
+[the one build flag](docs/ARCHITECTURE.md#the-one-build-flag).
 
 ### Claude Code
 
-You do not need Rust, and there is nothing to edit by hand.
-
-Run these three inside Claude Code:
+Three commands, inside Claude Code:
 
 ```
 /plugin marketplace add kiritbasu/specline
@@ -84,232 +92,51 @@ Run these three inside Claude Code:
 /specline:setup
 ```
 
-`/specline:setup` downloads the binaries, creates the store in `~/.specline`,
-and starts the daemon. Then restart Claude Code. MCP servers connect when Claude
-Code starts, so the `specline_*` tools will not appear in the session you
-installed from.
+`/specline:setup` downloads the binaries from the latest GitHub release, checks
+them against the SHA-256 in `specline-release.json`, creates the store in
+`~/.specline`, and starts the daemon. No Rust needed, despite the binaries
+landing in `~/.cargo/bin`.
 
-Installing the plugin is what registers the MCP server and the two session
-hooks. There is no `claude mcp add` to run and no `settings.json` to edit.
+**Then restart Claude Code.** MCP servers connect at startup, so the `specline_*`
+tools will not appear in the session you installed from.
 
-The hooks are what make this work without you asking:
+There is no `claude mcp add` to run and no `settings.json` to edit. Installing
+the plugin also installs two session hooks: one puts a summary of the project at
+the top of every conversation, and one asks a session that recorded nothing
+whether it should have.
 
-- **SessionStart** puts a summary of the project at the top of every
-  conversation, so Claude knows where things stand before you type anything.
-- **Stop** notices a session ending without having recorded anything, and asks
-  it to. Sessions that already wrote get nothing. A reminder that fires when you
-  have done the right thing is one you would turn off.
-
-To check on it at any point:
+To check the install:
 
 ```bash
 specline doctor
 ```
 
-### Codex
+<details>
+<summary><b>Codex</b> — no plugin, so four steps</summary>
 
-Codex has no plugin to install, so the three things the plugin does — get the
-daemon running, register the MCP server, install the hooks — are three separate
-steps here. None of them needs Claude Code.
+<br>
 
-**First, check you can run `codex` at all.** Two of the steps below are CLI
-commands, and if you installed Codex as the ChatGPT desktop app there is no
-`codex` on your `PATH` — the binary lives inside the app bundle.
-
-```bash
-command -v codex || ls /Applications/ChatGPT.app/Contents/Resources/codex
-```
-
-If only the second half printed anything, put a small wrapper on your `PATH`
-rather than a symlink:
-
-```bash
-printf '#!/bin/sh\nexec "/Applications/ChatGPT.app/Contents/Resources/codex" "$@"\n' \
-  > ~/.local/bin/codex && chmod +x ~/.local/bin/codex
-```
-
-**A symlink here looks equivalent and is not.** Codex resolves its helper
-executables — `codex-code-mode-host` among them — relative to the binary it was
-launched as, so a symlink sends it hunting for siblings in your `bin` directory
-that only exist inside the app bundle. Code Mode then fails closed and takes
-tool calls down with it, reporting a missing host rather than anything to do
-with the link. `exec` of the absolute path makes the bundled binary the running
-process, and the siblings resolve.
-
-Use a directory that is actually on your `PATH` — `~/.local/bin` is common but
-not universal, and `echo $PATH` settles it. Everything below assumes `codex`
-runs.
-
-**1. Get the daemon running.** The setup script is the same one
-`/specline:setup` runs, and it does not know or care which editor you use.
-
-```bash
-git clone https://github.com/kiritbasu/specline.git
-```
-
-```bash
-./specline/plugin/scripts/setup.sh
-```
-
-The clone is only how you get the script; it downloads the released binaries
-rather than building them, so you do not need Rust for this either.
-
-Skip both if Specline is already installed — one daemon serves every client, and
-a second one would only fight the first for the store.
-
-**2. Point Codex at it.**
+Run `./specline/plugin/scripts/setup.sh` from a clone to get the daemon running,
+then:
 
 ```bash
 codex mcp add specline --url http://127.0.0.1:7654/mcp
 ```
 
-No token, no headers. The daemon binds `127.0.0.1` only, and refuses any request
-carrying an `Origin` that is not this machine — which is a browser and never a
-local client, since a local client sends none.
+The hooks have no equivalent command. They go in `~/.codex/config.toml` by hand
+and then have to be approved with `/hooks` in the interactive CLI — **Codex skips
+any hook it has not been shown, with no error and no warning**, which is the
+usual reason a Specline install looks fine but sessions start with no project
+summary.
 
-Older Codex builds only understood servers launched as a subprocess. If yours
-rejects `--url`, add `experimental_use_rmcp_client = true` under `[features]` in
-`~/.codex/config.toml`, or upgrade — `codex mcp add --help` says whether `--url`
-is there.
+**[The full walkthrough is in docs/INSTALL.md](docs/INSTALL.md)**, including the
+ChatGPT-desktop `PATH` wrapper, the exact TOML, and a one-command check that
+proves all three pieces at once.
 
-**3. Install the hooks.** This is the step that matters most, and the one with
-no equivalent command, so it goes in `~/.codex/config.toml` by hand:
+</details>
 
-```toml
-[[hooks.SessionStart]]
-matcher = "startup|resume"
-
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "/Users/you/.cargo/bin/specline hook session-start"
-timeout = 15
-
-[[hooks.Stop]]
-
-[[hooks.Stop.hooks]]
-type = "command"
-command = "/Users/you/.cargo/bin/specline hook stop"
-timeout = 20
-```
-
-Write the path out in full rather than using `~`. TOML does not expand it, and
-whether the runner does before executing is not something to find out by having
-a hook quietly do nothing. `command -v specline` prints the path to paste.
-
-**4. Trust them, from the terminal.** Run `codex` with no arguments to get the
-interactive CLI, then type `/hooks` and approve the two entries. They appear as
-*"New hook — review required"* until you do.
-
-`/hooks` is a command of that CLI. It is **not** in the ChatGPT desktop app's
-`/` menu, which lists skills — typing `/hooks` there finds nothing, and it is
-easy to conclude the hooks are not supported rather than that you are in the
-wrong place. Trust is recorded against a hash of each hook in your Codex config,
-so granting it once in the terminal applies wherever Codex runs.
-
-Do not skip this and do not assume it worked. Codex **silently skips any hook it
-has not been shown** — no error, no warning, exactly the same as having
-configured nothing. If Specline seems installed but sessions start with no
-project summary, this is almost always why. Editing a hook's command afterwards
-changes its hash and needs `/hooks` again.
-
-Then restart Codex. MCP servers connect at startup, so the tools will not appear
-in the session you set this up from.
-
-**5. Check it.** One command proves all three pieces at once:
-
-```bash
-codex exec --sandbox read-only "Call the specline_projects tool and reply with just the number it returned."
-```
-
-A working install prints four things: `hook: SessionStart`, then
-`mcp: specline/specline_projects started` and `completed`, then a number, then
-`hook: Stop`. Anything missing says which piece is not wired — no
-`hook:` lines means the hooks are not trusted, and a tool the model reports as
-unavailable means the MCP server is not connected.
-
-### Running both at once
-
-You can. One daemon holds the store and every client is an HTTP client of it, so
-there is never a second writer — that is the same arrangement two Claude Code
-windows already use, and it is tested with sixteen concurrent sessions rather
-than two.
-
-Two consequences worth knowing. Claims are real across editors: if a Codex
-session has claimed a task, Claude Code is refused it and told which session
-holds it, which is the behaviour you want rather than a collision. And the
-daemon's rate limit is one budget shared by everything connected, generous
-enough that only a runaway loop reaches it.
-
-### What leaves your machine
-
-One thing, and you should hear it here rather than find it later. The daemon
-checks for a new release every half hour. It sends nothing from your store: no
-project names, no counts, no identifier. Nothing installs without you agreeing
-to the restart.
-
-Turn it off at install time with `--no-update-check`, or afterwards with
-`SPECLINE_AUTO_UPDATE=0`. With it off, Specline makes no network requests at
-all.
-
-### Stopping and starting it
-
-**`kill` does not work, and that is deliberate.** The daemon runs under a
-service manager that restarts it — `KeepAlive` on macOS, `Restart` on Linux —
-so killing the process brings it straight back and reads as Specline ignoring
-you. Go through the service manager instead.
-
-```bash
-launchctl bootout gui/$(id -u)/sh.specline.daemon      # stop, macOS
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/sh.specline.daemon.plist
-```
-
-```bash
-systemctl --user stop specline.service                 # stop, Linux
-systemctl --user start specline.service
-```
-
-To restart in one step — after replacing the binaries, say — macOS has
-`launchctl kickstart -k gui/$(id -u)/sh.specline.daemon` and Linux has
-`systemctl --user restart specline.service`.
-
-Stopping the daemon does not stop Specline. The CLI opens the store directly
-when nothing is listening, so `specline status`, `search` and the rest keep
-working; what stops is the MCP surface your agent talks to, and the app.
-
-### Uninstalling
-
-One command, the same way installing is:
-
-```bash
-curl -fsSL https://github.com/kiritbasu/specline/releases/latest/download/specline-uninstall.sh | sh
-```
-
-It stops the service through the service manager, removes it, and removes the
-two binaries. It ships as a release asset with its checksum in
-`specline-release.json`, so you can download it, read it and check it before
-running it rather than piping it — which for a script whose job is deleting
-things is the version I would do.
-
-From a clone, it is `./plugin/scripts/uninstall.sh` and the same flags apply.
-Add `--dry-run` either way if you want to read what it would do first.
-
-**Your store is kept.** `~/.specline` holds every decision, question and note
-Specline has recorded, nothing else on disk has a copy, and reinstalling picks
-it up again exactly where it was. Removing it is a separate decision and takes
-a separate flag:
-
-```bash
-curl -fsSL https://github.com/kiritbasu/specline/releases/latest/download/specline-uninstall.sh | sh -s -- --purge
-```
-
-which backs the store up to your home directory before deleting it — with
-`specline backup` if the binary is still there, and a plain directory copy if it
-is not. It refuses to delete anything it could not first copy.
-
-**Two things it leaves alone**, because they are yours rather than Specline's,
-and it prints them rather than editing your files: `/plugin uninstall specline`
-in Claude Code, and `codex mcp remove specline` plus deleting the two
-`[[hooks.*]]` blocks from `~/.codex/config.toml` in Codex.
+**Running two editors, managing the service, and uninstalling** are all in
+**[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ---
 
@@ -317,21 +144,39 @@ in Claude Code, and `codex mcp remove specline` plus deleting the two
 
 ### Mostly you do not
 
-That is the idea. Work with Claude the way you already do, and Specline fills up
-on its own.
-
-Things that get Claude writing:
+These get Claude writing:
 
 > "Let's go with the second option — Postgres, because we already run one."
 > "That's a bug, the retry loop doesn't back off."
 > "I don't know whether we need per-tenant keys. Leave it for now."
 
-Things that get it reading:
+These get it reading:
 
 > "What's the state of the auth work?"
 > "Why did we pick SQLite?"
 > "What's blocking the release?"
 > "What should I do next?"
+
+### What that looks like
+
+Partway through a conversation about the board, you say:
+
+> "Let's not add a new task type for that — a label already does it."
+
+Nothing else happens. You carry on. Specline has a decision, and this one is real
+— it is [B-25](product/DECISIONS.md), recorded by the session that had the
+conversation:
+
+> **"Waiting on a human decision" is the decision-needed label, not a new task kind**
+>
+> The bootstrap already used the label, so the data existed. A new `TaskKind`
+> would be a schema change to express something a label expresses. The cost is
+> that it is a convention: nothing enforces it, and a decision task without the
+> label ranks as ordinary work.
+
+The cost is in there because you would want it in six months, and because the
+session that wrote it had just finished arguing about it. That is the difference
+between this and a row that says "use a label".
 
 ### The app
 
@@ -340,88 +185,74 @@ specline ui
 ```
 
 The daemon serves the app itself, compiled into the binary, so there is no Node
-and nothing else to start. It opens whatever address the daemon is listening on,
-so a non-default port needs no arguments.
+and nothing else to start.
 
-A board, with what to pick up next at the top — grouped by whether it is in an
-open phase, and saying why each one is where it is:
+A board, with what to pick up next at the top, grouped by whether it is in an open
+phase and saying why each one is where it is:
 
 ![The board, with a ranked "next" strip above the columns](docs/images/board.png)
 
-Documents that keep their reasoning. Requirements are anchored, so a task can
-point at one requirement rather than a whole spec, and each document shows the
-decision behind it and the tasks doing the work:
+Documents that keep their reasoning. Requirements are anchored, so a task can point
+at one requirement instead of a whole spec, and each document shows the decision
+behind it alongside the tasks doing the work:
 
 ![A spec with requirement anchors and a panel of connected decisions and tasks](docs/images/document.png)
 
-A roadmap, search across everything, and a feed of what changed and which
-conversation changed it:
-
-![The roadmap: shipped, active and planned milestones](docs/images/roadmap.png)
-
-**The app files things. Claude writes them.** Creating a task, commenting,
-closing, archiving, and moving a task's status, priority, kind, phase or
-labels — drag a card between columns, or use the controls on the task itself.
-Those are your own actions. The body of a spec or a decision gets written by
-Claude in the conversation where you worked it out. That is the part worth
-keeping, and it is not something anyone wants to type into a form.
-
-Two moves the app will not make, and it says so rather than failing quietly.
-Closing needs a reason, a message and evidence, so it opens the form that asks
-for them instead of setting a status. And starting a task is a claim, which
-records *which conversation* is on it — a person clicking a dropdown has none,
-so the board asks you to have Claude pick it up.
+**The app files things and Claude writes them.** Creating a task, commenting,
+closing, archiving, and moving a task's status, priority, kind, phase or labels
+are all your own actions. The body of a spec or a decision gets written by Claude,
+in the conversation where you worked it out. There are two moves the app will not
+make: closing needs a reason, a message and evidence, so it opens a form asking
+for them; and starting a task is a claim, which has to name the conversation doing
+the work, so the board asks you to have Claude pick it up. The full boundary is in
+[what the app may write](docs/ARCHITECTURE.md#what-the-app-may-write).
 
 ### The command line
 
 You will not need it often. Four are worth knowing:
 
 ```bash
-specline doctor
+specline doctor      # has anything gone wrong? every read-only check, one page
+specline next        # what to work on next
+specline generate    # write the markdown into your repo
+specline backup      # snapshot the store; `restore` puts it back
 ```
 
-```bash
-specline next <project>
-```
-
-```bash
-specline generate <project>
-```
-
-```bash
-specline backup
-```
-
-`doctor` answers "has anything gone wrong": it runs every read-only check there
-is, `fsck` included, and prints one page. `next` says what to work on next.
-`generate` writes the markdown into your repo. `backup` takes a snapshot, and
-`restore` puts it back.
-
-All of it works whether or not the daemon is running. The CLI asks the daemon
-when there is one and opens the store directly when there is not.
+All of it works whether or not the daemon is running.
 
 **All 24 commands are in [docs/CLI.md](docs/CLI.md).**
+
+### Getting the most out of it
+
+**Talk about the project rather than dictating records.** "We're going with
+Postgres because we already run one" gets you a decision with a reason in it,
+where "Create a decision record titled Postgres" gets you a row that means nothing
+in six months.
+
+**Say why out loud.** What you rejected, and why, is the part you will want later.
+
+**Use the short IDs.** Tasks are `KEEL-42` and decisions are `B-12`, they do not
+change, and they work anywhere an ID is accepted.
+
+**Leave open questions open.** Every session sees them before it starts, which
+stops Claude quietly re-deciding something you settled.
 
 ---
 
 ## What is in it
 
 Thirteen kinds of thing, and that is the limit. "We need a new type for this"
-nearly always turns out to be a field or a label:
+nearly always turns out to be a field or a label.
 
 **project**, **milestone**, **task**, **spec**, **decision**, **question**,
 **term**, **feedback**, **design**, **environment**, **metric**,
 **metric observation**, **artifact**.
 
-They are joined by a typed graph. A task implements a spec, a decision
-supersedes an older one, a task blocks another. The graph is what lets you ask
-what is blocked instead of guessing.
+A typed graph joins them, where a task implements a spec, a decision supersedes an
+older one, and a task blocks another. That graph is how you ask what is blocked.
 
-An agent sees thirteen tools: `specline_context`, `specline_search`,
-`specline_get`, `specline_projects`, `specline_activity`, `specline_create`,
-`specline_update`, `specline_write_doc`, `specline_note`, `specline_link`,
-`specline_next`, `specline_claim`, `specline_close`. Thirteen rather than
-forty, because a model picks well from a short list and badly from a long one.
+An agent sees [thirteen tools](docs/ARCHITECTURE.md#the-mcp-surface), because a
+model picks well from a short list.
 
 ---
 
@@ -438,122 +269,40 @@ project gets four files:
 ```
 
 As documents accumulate, `.specline/specs/` and `.specline/decisions/` fill up
-with one file each.
+with one file each, and a document can take a path of its own — tell Specline that
+a spec lives at `docs/SPEC.md` and that is where it goes from then on.
 
-Anything past that is opt-in. A document can take a path of its own: tell
-Specline that a spec lives at `docs/SPEC.md` and that is where it goes from then
-on. A project can also say where its tracker and decision log belong. That is
-why this repository has `product/SPEC.md`, `product/STATUS.md` and
-`product/DECISIONS.md`. You do not get those by creating a project. Someone
-asked for them.
+**These files are output**, and each one says so at the top. The next
+`specline generate` writes over anything you change. To change what they say,
+change the source: ask Claude to rewrite it, or edit it in the app. If you have
+already edited a file by hand and want the words kept, `specline import <file>`
+puts them back as a proper revision.
 
-**These files are output.** Each one says so at the top. Editing them is not
-forbidden so much as pointless: the next `specline generate` writes over them
-and your words are gone.
-
-To change what they say, change the source. Ask Claude to rewrite it, or edit it
-in the app. If you have already edited a file by hand and want the words kept,
-`specline import <file>` puts them back in as a proper revision.
-
-A pre-commit hook rejects any commit containing a hand-edited generated file, so
-you find out then rather than after the next regeneration:
+To catch a hand edit before it lands, put this in `.git/hooks/pre-commit`:
 
 ```bash
-ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+#!/bin/sh
+specline generate <your-project> --check
 ```
-
----
-
-## Getting more out of it
-
-**Talk about the project rather than dictating records.** "We're going with
-Postgres because we already run one" gets you a decision with a reason in it.
-"Create a decision record titled Postgres" gets you a row that means nothing in
-six months.
-
-**Say why out loud.** The reason is the part you will want later. The choice
-usually looks obvious in hindsight; the option you rejected almost never does.
-
-**Use the short IDs.** Tasks are `KEEL-42`, decisions are `B-12`. Use them in
-conversation. They do not change, and they work anywhere an ID is accepted.
-
-**Leave open questions open.** If something genuinely is not decided, recording
-it as a question beats a confident guess. Every session sees open questions
-before it starts, which stops Claude quietly re-deciding something you settled.
-
-**Do not hand-edit generated files.** Change the source instead.
-
-**Run `specline doctor` now and then**, and `specline backup` before anything
-drastic.
-
-**Restart the daemon after upgrading.** Specline will not start if the binary is
-older than the store's schema. That turns a corrupted store into an error
-message you can read, but you still have to restart it.
 
 ---
 
 ## How it is built
 
-Rust, one workspace, six crates, one SQLite file, and a daemon that owns the
-only write path. Search combines FTS5 keyword matching with `sqlite-vec`
-similarity. Every change is an event carrying an author and the conversation it
-came from.
+Rust, one workspace, six crates, one SQLite file, and a daemon that owns the only
+write path. Search combines FTS5 keyword matching with `sqlite-vec` similarity,
+and every change is an event carrying an author and the conversation it came from.
 
-**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** has the detail: the crate
-layout, how storage works, why the direction of a graph query is the easiest
-thing to get wrong, what the app may and may not write, and the one build flag
-that decides whether a platform compiles.
+This repository runs on it: [product/DECISIONS.md](product/DECISIONS.md) and
+[product/JOURNAL.md](product/JOURNAL.md) are generated from the store.
 
-### Building from source
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** has the crate layout, how storage
+works, why the direction of a graph query is the easiest thing to get wrong, and
+what the app may and may not write. **[CONTRIBUTING.md](CONTRIBUTING.md)** covers
+building it yourself.
 
-You need [Rust](https://rustup.rs). This is for working on Specline. To use it,
-follow the plugin install above.
+---
 
-```bash
-git clone https://github.com/kiritbasu/specline.git && cd specline
-```
-
-```bash
-./plugin/install.sh
-```
-
-That builds the binaries and puts them in `~/.cargo/bin`, which is where a
-release installs them too, so you only ever have one copy. It also creates the
-store and copies the skill and hooks into `~/.claude/`.
-
-After editing anything under `plugin/`, run `./plugin/install.sh --skill-only`.
-It skips the build and copies the three files across. The copies under
-`~/.claude` are what actually run, so a change you make in the repository and do
-not copy does nothing.
-
-```bash
-cargo test --workspace
-```
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-```
-
-```bash
-cargo fmt --all --check
-```
-
-The screenshots above come from `specline fixture`, which loads an invented
-corpus into an empty store. `scripts/shoot-screenshots.mjs` retakes them.
-
-### Where the documentation is
-
-The prose is in `product/`, generated from the store:
-
-- `product/PRD.md` — what this is for
-- `product/SPEC.md` — how it works
-- `product/DECISIONS.md` — every decision and why
-- `product/STATUS.md` — what is open and what is next
-- `product/CHANGELOG.md` — what has closed, with the reason and the evidence
-- `product/JOURNAL.md` — what happened, session by session
-- `product/GATE.md` — the one measurement that mattered, and why it stopped
-
-Everything else the store holds is written the same way: one file per spec
-under `.specline/specs/`, one per decision under `.specline/decisions/`, and
-the open questions and glossary beside them. Those are the phase specs, the
-build-time decisions and the terms, in the same generated form.
+<div align="center">
+<sub>Apache-2.0 · <a href="https://github.com/kiritbasu/specline/issues">Issues</a> · <a href="docs/INSTALL.md">Install</a> · <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/CLI.md">CLI</a></sub>
+</div>

@@ -1,6 +1,6 @@
 # Specline — Changelog
 
-<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-08T10:35:27Z -->
+<!-- specline:generated project prj_01KZKMPVHJNCCQH3JQNAXJJ03M 2026-09-09T09:48:17Z -->
 > **Generated from the task rows and the event log. Do not edit — Specline is the source of truth.**
 
 What has finished. What is happening now is in the tracker beside this file.
@@ -1628,6 +1628,11 @@ What has finished. What is happening now is in the tracker beside this file.
 
 | Date | Actor | Change |
 |---|---|---|
+| 2026-09-09 | claude | created task “The README tells users to symlink a pre-commit hook that only exists in this repository” |
+| 2026-09-09 | claude | status todo → in_progress |
+| 2026-09-09 | claude | claimed_by none → ses_a0b4dc78-9f6d-4441-bb5a-13c4fb31fdac |
+| 2026-09-09 | claude | claimed_at none → 2026-09-09T08:12:22.654732Z |
+| 2026-09-09 | claude | created task “Rewrite the README: status badges, collapsible install sections, and plain technical English” |
 | 2026-09-08 | claude | “A session that never writes leaves no trace, so nothing can…” blocks “Sessions start well and stop writing partway through. What…” |
 | 2026-09-08 | claude | created task “A session that never writes leaves no trace, so nothing can measure whether sessions keep using Specline” |
 | 2026-09-08 | claude | revised question “Sessions start well and stop writing partway through. What actually fixes that, and is a hook the lever?” to v1 |
@@ -1823,11 +1828,6 @@ What has finished. What is happening now is in the tracker beside this file.
 | 2026-08-19 | claude | claimed_by none → ses_0c88585b-90df-4dd7-aca0-f92db84044d9 |
 | 2026-08-19 | claude | claimed_at none → 2026-08-19T21:00:39.131485Z |
 | 2026-08-19 | claude | created task “Embeddings on by default, and the backlog embedded without anyone asking” |
-| 2026-08-19 | claude | status todo → wont_do |
-| 2026-08-19 | claude | close_reason none → wont_do |
-| 2026-08-19 | claude | close_message none → (517 characters) |
-| 2026-08-19 | claude | created task “Put semantic search in a released binary, by loading the ONNX runtime instead of linking it” |
-| 2026-08-19 | claude | revised decision “Semantic search is on unless you turn it off, and the model arrives without being asked for” to v1 |
 
-*Showing the 200 most recent of 2798 changes. Use `specline_activity` for the rest.*
+*Showing the 200 most recent of 2803 changes. Use `specline_activity` for the rest.*
 

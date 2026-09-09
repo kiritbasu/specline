@@ -34,6 +34,30 @@ generated, because it is what loads them.
 
 ## Building and the gate
 
+### Getting a working install
+
+```bash
+git clone https://github.com/kiritbasu/specline.git && cd specline
+```
+
+```bash
+./plugin/install.sh
+```
+
+That builds both binaries and puts them in `~/.cargo/bin`, which is where a
+release installs them too, so you only ever have one copy. It also creates the
+store and copies the skill and hooks into `~/.claude/`.
+
+After editing anything under `plugin/`, run `./plugin/install.sh --skill-only`,
+which skips the build and copies the three files across. The copies under
+`~/.claude` are what run, so a repository change you do not copy has no effect.
+
+The screenshots in the README come from `specline fixture`, which loads an
+invented corpus into an empty store; `scripts/shoot-screenshots.mjs` retakes
+them.
+
+### The checks
+
 ```bash
 cargo build --workspace
 ```
