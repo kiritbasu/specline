@@ -4,8 +4,7 @@ Rust, one Cargo workspace, six crates, one SQLite file, and a daemon that owns
 the only write path. The app is a React build compiled into the daemon binary.
 No services, no containers, no account.
 
-This describes the shape of the thing. `product/SPEC.md` is the specification
-and wins wherever the two disagree.
+This describes the shape of the thing, and how it got that way.
 
 ---
 
@@ -62,8 +61,7 @@ added. Keyword search covers every artifact whether or not the build can embed.
 It was two engines until Phase 9: DuckDB for rows and Lance for documents, with
 the second attached into the first as a SQL namespace. That worked, but it cost
 a 22-minute build, a keyword index rebuilt in full on every write, and two
-backup formats to keep in step. `product/SPEC.md` D-1 has the original reasoning
-and what overturned it.
+backup formats to keep in step.
 
 ### One writer
 
@@ -125,12 +123,27 @@ and you get an empty result, which looks exactly like a legitimate "nothing is
 linked to this". No error, no warning, and the product looks fine while it
 quietly drops data. The first draft of the spec had both traversals inverted.
 
-The rules that follow from that:
+Direction reads left to right: **`from` does the verb to `to`.** This table is
+the authority. Read it each time rather than remembering it.
 
-- `product/SPEC.md` §3.3 has the direction table and is the only authority. Read
-  it each time rather than remembering it.
+| Relation | Reads as | Example |
+|---|---|---|
+| `implements` | from **implements** to | task → spec `REQ-4` |
+| `blocks` | from **blocks** to | task A → task B, A first |
+| `depends_on` | from **depends on** to | inverse of `blocks`; never both |
+| `supersedes` | from **supersedes** to | decision v2 → decision v1 |
+| `derived_from` | from **derives from** to | spec → feedback |
+| `resolves` | from **resolves** to | decision → question |
+| `references` | from **references** to | anything → anything |
+| `duplicates` | from **duplicates** to | task → task |
+| `informs` | from **informs** to | feedback → spec |
+
+The rules that follow:
+
 - `blocks` and `depends_on` are inverses. Only `blocks` is stored, and
-  `specline-core` swaps the endpoints on write.
+  `specline-core` swaps the endpoints on write. Nothing in the schema enforces
+  that and nothing can, since both are legal values, so it is enforced on write
+  and audited by `fsck`.
 - Every relation has a test asserting what it returns outbound and what it
   returns inbound.
 - Treat an unexpectedly empty graph result as a direction bug until you have

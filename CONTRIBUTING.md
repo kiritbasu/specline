@@ -8,10 +8,8 @@ foundation.
 
 **Open an issue first for anything beyond a bug fix.** Specline has strong opinions
 and most of them are written down; a change that cuts against one is a wasted
-afternoon for you and an awkward conversation for me. `product/PRD.md` says what
-it is for, `product/SPEC.md` says how it works, and `product/DECISIONS.md` says
-why things are the way they are — including several things that were tried and
-rejected.
+afternoon for you and an awkward conversation for me. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+says how it works and why, including several things that were tried and rejected.
 
 Small, obvious fixes need no ceremony. Send them.
 

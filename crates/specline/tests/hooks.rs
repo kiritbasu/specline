@@ -664,10 +664,16 @@ fn git(cwd: &std::path::Path, args: &[&str]) {
 }
 
 /// Stage a generated file, so the hook has something to check.
+/// Stage the generated file the hook actually watches.
+///
+/// `.claude/CONTRACT.md`, not `product/STATUS.md`, since 2026-09-10: `product/`
+/// and `.specline/` stopped being tracked, so the only generated files git can
+/// still see a hand edit to are the standing contract and the glossary. A hook
+/// watching an ignored directory would be watching nothing.
 fn stage_a_generated_file(tree: &std::path::Path, text: &str) {
-    std::fs::create_dir_all(tree.join("product")).unwrap();
-    std::fs::write(tree.join("product/STATUS.md"), text).unwrap();
-    git(tree, &["add", "product/STATUS.md"]);
+    std::fs::create_dir_all(tree.join(".claude")).unwrap();
+    std::fs::write(tree.join(".claude/CONTRACT.md"), text).unwrap();
+    git(tree, &["add", ".claude/CONTRACT.md"]);
 }
 
 /// Run `scripts/pre-commit` in `cwd`, with only the stub on `PATH`.
@@ -748,7 +754,7 @@ fn the_pre_commit_check_reads_the_worktree_it_is_committing_from() {
 /// generated file differs, and the commit is refused with somewhere to go.
 #[test]
 fn the_pre_commit_hook_refuses_a_commit_when_a_generated_file_has_drifted() {
-    let sandbox = sandbox(1, "stale product/STATUS.md");
+    let sandbox = sandbox(1, "stale .claude/CONTRACT.md");
     let repo = sandbox.dir.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
@@ -760,7 +766,7 @@ fn the_pre_commit_hook_refuses_a_commit_when_a_generated_file_has_drifted() {
     let (output, code) = run_pre_commit(&sandbox, &repo);
     assert_eq!(code, 1, "drift blocks the commit: {output}");
     assert!(
-        output.contains("stale product/STATUS.md"),
+        output.contains("stale .claude/CONTRACT.md"),
         "the refusal repeats what the check said: {output}"
     );
     assert!(

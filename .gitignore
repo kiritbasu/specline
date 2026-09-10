@@ -37,3 +37,12 @@ node_modules/
 # the artboards that generate it are, so they are excepted by name.
 .design/**/*.html
 !.design/**/*.dc.html
+
+# Generated from the Specline store, and deliberately not published: these are
+# internal reasoning — the decision log, the journal, the open questions, the
+# phase specs — rather than anything a reader of this repository needs. Run
+# `specline generate specline` to write them locally. The glossary is the one
+# exception, because the project's vocabulary helps somebody reading the code.
+product/
+.specline/
+!.specline/glossary.md

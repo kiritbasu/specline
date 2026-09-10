@@ -253,6 +253,6 @@ cat <<'EOF'
   harness is kept and still tested, because the next time the agent's
   orientation changes it is the only way to find out what that did.
 
-  product/GATE.md is the whole story, including the five evenings spent fixing
-  a problem that turned out not to exist.
+  The whole story, including the five evenings spent fixing a problem that
+  turned out not to exist, is in the store: ask Claude about the gate.
 EOF

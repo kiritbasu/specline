@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Worth knowing before you write: `product/DECISIONS.md` records what was
-        chosen and why, including several things that were tried and dropped. If
-        your idea is in there, saying why that reasoning is wrong is a much
+        Worth knowing before you write: docs/ARCHITECTURE.md records how this
+        works and why, including several things that were tried and dropped. If
+        your idea cuts against one, saying why that reasoning is wrong is a much
         stronger opening than proposing it fresh.
 
   - type: textarea

@@ -163,9 +163,8 @@ Partway through a conversation about the board, you say:
 
 > "Let's not add a new task type for that — a label already does it."
 
-Nothing else happens. You carry on. Specline has a decision, and this one is real
-— it is [B-25](product/DECISIONS.md), recorded by the session that had the
-conversation:
+Nothing else happens. You carry on. Specline has a decision, written by the
+session that had the conversation:
 
 > **"Waiting on a human decision" is the decision-needed label, not a new task kind**
 >
@@ -220,7 +219,7 @@ specline backup      # snapshot the store; `restore` puts it back
 
 All of it works whether or not the daemon is running.
 
-**All 24 commands are in [docs/CLI.md](docs/CLI.md).**
+**All 26 commands are in [docs/CLI.md](docs/CLI.md).**
 
 ### Getting the most out of it
 
@@ -241,18 +240,19 @@ stops Claude quietly re-deciding something you settled.
 
 ## What is in it
 
-Thirteen kinds of thing, and that is the limit. "We need a new type for this"
-nearly always turns out to be a field or a label.
+Thirteen types, and thirteen is the cap. "We need a new type for this" nearly
+always turns out to be a field or a label.
 
-**project**, **milestone**, **task**, **spec**, **decision**, **question**,
-**term**, **feedback**, **design**, **environment**, **metric**,
-**metric observation**, **artifact**.
+| | |
+|---|---|
+| **task**, **milestone** | the work, and what it ships in |
+| **spec**, **decision**, **question** | what to build, what you chose, what is still open |
+| **feedback**, **design**, **artifact** | what came in from outside, and anything that fits nowhere else |
+| **term**, **environment**, **metric**, **metric observation** | the project's own words, where it runs, what you measure |
 
-A typed graph joins them, where a task implements a spec, a decision supersedes an
-older one, and a task blocks another. That graph is how you ask what is blocked.
-
-An agent sees [thirteen tools](docs/ARCHITECTURE.md#the-mcp-surface), because a
-model picks well from a short list.
+Everything belongs to a **project**, and typed links join them: a task
+*implements* a spec, a decision *resolves* a question, a task *blocks* another.
+That turns "what is blocked, and by what" into a query.
 
 ---
 
@@ -292,9 +292,12 @@ specline generate <your-project> --check
 Rust, one workspace, six crates, one SQLite file, and a daemon that owns the only
 write path. Search combines FTS5 keyword matching with `sqlite-vec` similarity,
 and every change is an event carrying an author and the conversation it came from.
+Agents reach all of it through
+[thirteen MCP tools](docs/ARCHITECTURE.md#the-mcp-surface), kept few because a
+model picks well from a short list.
 
-This repository runs on it: [product/DECISIONS.md](product/DECISIONS.md) and
-[product/JOURNAL.md](product/JOURNAL.md) are generated from the store.
+Specline is built with Specline. Its own tasks, decisions and open questions
+live in a store on the machine this was written on.
 
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** has the crate layout, how storage
 works, why the direction of a graph query is the easiest thing to get wrong, and

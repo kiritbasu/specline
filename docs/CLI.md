@@ -126,6 +126,38 @@ conversation that learned it.
 This is the only write path that does not go through MCP, so you can still
 record a note when the MCP surface is down.
 
+### `specline signal <summary> --project <project>`
+
+File a signal into the Inbox: something somebody wants, before anybody has
+decided whether to build it.
+
+A signal is not a task. Nothing has been committed to, there is nothing to claim,
+and it stays out of `next` and out of the open count until somebody triages it.
+The only required argument is what was said.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--project <p>` | — | Project id, slug or name. Required |
+| `--kind <k>` | `idea` | `interview`, `support`, `sales`, `idea`, `competitor`, `observation` |
+| `--source <s>` | — | Who said it, or where it came from |
+| `--contact <c>` | — | How to reach them, if closing the loop will need it |
+| `--occurred-at <t>` | today | When it was said |
+| `--body <text>` | — | The verbatim, or the context |
+
+### `specline triage <signal-id>`
+
+Pick a signal up, or set it down with the argument.
+
+A signal cannot leave the Inbox without an outcome, which is why this is a verb
+rather than a field somebody sets. Setting one down does not delete it: the
+argument is written onto the signal where search will find it, so the same idea
+arriving in four months finds the reasoning instead of silence.
+
+| Flag | What it does |
+|---|---|
+| `--feature <spc_…>` | Pick it up, naming the feature spec that makes the case |
+| `--set-down <text>` | Set it down: why, in a sentence worth finding later |
+
 ### `specline ui`
 
 Open the interface in a browser.

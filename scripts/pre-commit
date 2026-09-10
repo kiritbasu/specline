@@ -25,9 +25,20 @@ set -uo pipefail
 # needs to know which project's outputs to compare against.
 project="${SPECLINE_PROJECT:-specline}"
 
-# Nothing staged under the generated tree means nothing to check. Committing a
+# Nothing staged under a generated file means nothing to check. Committing a
 # code change should not pay for a store round-trip.
-staged="$(git diff --cached --name-only --diff-filter=ACM -- 'product/*.md' '.keel/**/*.md' 2>/dev/null)"
+#
+# **Only two generated files are tracked**, since `product/` and `.specline/`
+# stopped being published: the standing contract at `.claude/CONTRACT.md`, which
+# has to survive a clone because the root `CLAUDE.md` imports it, and
+# `.specline/glossary.md`. Everything else generates into an ignored directory,
+# where a hand edit costs nothing because git never sees it.
+#
+# This glob said `.keel/**/*.md` until 2026-09-10 — the pre-rename directory
+# name — so for as long as the rename had been in, the hook checked nothing
+# under `.specline/` and exited 0 saying there was nothing to check. That is the
+# failure this hook exists to prevent, wearing the hook's own clothes.
+staged="$(git diff --cached --name-only --diff-filter=ACM -- '.claude/CONTRACT.md' '.specline/glossary.md' 2>/dev/null)"
 [ -n "$staged" ] || exit 0
 
 # The **newest** usable build wins, and PATH loses ties.

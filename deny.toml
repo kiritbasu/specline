@@ -1,4 +1,5 @@
-# cargo-deny configuration. Run in CI per product/CLAUDE.md engineering standards.
+# cargo-deny configuration. Run in CI per the engineering standards in
+# .claude/CONTRACT.md.
 
 [graph]
 targets = [
