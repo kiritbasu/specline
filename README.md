@@ -8,15 +8,17 @@
 
 [![CI](https://github.com/kiritbasu/specline/actions/workflows/ci.yml/badge.svg)](https://github.com/kiritbasu/specline/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kiritbasu/specline?color=blue)](https://github.com/kiritbasu/specline/releases/latest) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Platform](https://img.shields.io/badge/platform-macOS%20arm64-lightgrey.svg)](#requirements)
 
-[Install](#install) · [Using it](#using-it) · [What is in it](#what-is-in-it) · [Full install guide](docs/INSTALL.md) · [Architecture](docs/ARCHITECTURE.md) · [CLI](docs/CLI.md)
+[Install](#install) · [What is in it](#what-is-in-it) · [Full install guide](docs/INSTALL.md) · [Architecture](docs/ARCHITECTURE.md) · [CLI](docs/CLI.md)
 
 </div>
 
 ---
 
 Specline stores and organises everything about a long-running AI development
-project: specs, PRDs, roadmaps, tasks and feature requests. You work with Claude
-Code or Codex the way you already do, and Specline records it as you go.
+project: specs, PRDs, roadmaps, tasks and feature requests. It is a personal,
+local alternative to Linear, Shortcut or any hosted ticketing system. You work
+with Claude Code or Codex the way you already do, and Specline records it as you
+go.
 
 ![The project overview: open work, questions and risks, recent decisions](docs/images/overview.png)
 
@@ -46,6 +48,34 @@ second step to remember.
 
 The next session reads the store before it reads anything else.
 
+**The app.** `specline ui` opens it. The daemon serves it from the binary, so
+there is no Node and nothing else to start. The board puts what to pick up next
+at the top, and says why:
+
+![The board, with a ranked "next" strip above the columns](docs/images/board.png)
+
+A document shows the decision behind it and the tasks doing the work, and a task
+can point at one requirement in a spec rather than the whole thing:
+
+![A spec with requirement anchors and a panel of connected decisions and tasks](docs/images/document.png)
+
+The app files things and Claude writes them. Creating, closing and moving tasks
+are your own actions. The body of a spec or a decision is written by Claude, in
+the conversation where you worked it out. The full boundary is in
+[what the app may write](docs/ARCHITECTURE.md#what-the-app-may-write).
+
+**The command line.** You will not need it often. Four are worth knowing:
+
+```bash
+specline doctor      # has anything gone wrong? every read-only check, one page
+specline next        # what to work on next
+specline generate    # write the markdown into your repo
+specline backup      # snapshot the store; `restore` puts it back
+```
+
+All of it works whether or not the daemon is running. All 26 commands are in
+[docs/CLI.md](docs/CLI.md).
+
 **Your data stays on your disk.** Everything lives in `~/.specline`, with no
 account and no cloud behind it. The daemon listens on `127.0.0.1`, so nothing off
 your machine can reach it. One thing does leave: the daemon checks for a new
@@ -53,10 +83,6 @@ release every half hour, sending nothing from your store and installing nothing
 without you agreeing to the restart. `--no-update-check` at install time or
 `SPECLINE_AUTO_UPDATE=0` afterwards turns that off, and then Specline makes no
 network requests at all.
-
-**You get readable files.** Specline writes markdown into your repository, where
-you can grep it and diff it and commit it beside the code it describes. If
-Specline went away tomorrow, the files would still be there.
 
 ### What it is not
 
@@ -140,104 +166,6 @@ proves all three pieces at once.
 
 ---
 
-## Using it
-
-### Mostly you do not
-
-These get Claude writing:
-
-> "Let's go with the second option — Postgres, because we already run one."
-> "That's a bug, the retry loop doesn't back off."
-> "I don't know whether we need per-tenant keys. Leave it for now."
-
-These get it reading:
-
-> "What's the state of the auth work?"
-> "Why did we pick SQLite?"
-> "What's blocking the release?"
-> "What should I do next?"
-
-### What that looks like
-
-Partway through a conversation about the board, you say:
-
-> "Let's not add a new task type for that — a label already does it."
-
-Nothing else happens. You carry on. Specline has a decision, written by the
-session that had the conversation:
-
-> **"Waiting on a human decision" is the decision-needed label, not a new task kind**
->
-> The bootstrap already used the label, so the data existed. A new `TaskKind`
-> would be a schema change to express something a label expresses. The cost is
-> that it is a convention: nothing enforces it, and a decision task without the
-> label ranks as ordinary work.
-
-The cost is in there because you would want it in six months, and because the
-session that wrote it had just finished arguing about it. That is the difference
-between this and a row that says "use a label".
-
-### The app
-
-```bash
-specline ui
-```
-
-The daemon serves the app itself, compiled into the binary, so there is no Node
-and nothing else to start.
-
-A board, with what to pick up next at the top, grouped by whether it is in an open
-phase and saying why each one is where it is:
-
-![The board, with a ranked "next" strip above the columns](docs/images/board.png)
-
-Documents that keep their reasoning. Requirements are anchored, so a task can point
-at one requirement instead of a whole spec, and each document shows the decision
-behind it alongside the tasks doing the work:
-
-![A spec with requirement anchors and a panel of connected decisions and tasks](docs/images/document.png)
-
-**The app files things and Claude writes them.** Creating a task, commenting,
-closing, archiving, and moving a task's status, priority, kind, phase or labels
-are all your own actions. The body of a spec or a decision gets written by Claude,
-in the conversation where you worked it out. There are two moves the app will not
-make: closing needs a reason, a message and evidence, so it opens a form asking
-for them; and starting a task is a claim, which has to name the conversation doing
-the work, so the board asks you to have Claude pick it up. The full boundary is in
-[what the app may write](docs/ARCHITECTURE.md#what-the-app-may-write).
-
-### The command line
-
-You will not need it often. Four are worth knowing:
-
-```bash
-specline doctor      # has anything gone wrong? every read-only check, one page
-specline next        # what to work on next
-specline generate    # write the markdown into your repo
-specline backup      # snapshot the store; `restore` puts it back
-```
-
-All of it works whether or not the daemon is running.
-
-**All 26 commands are in [docs/CLI.md](docs/CLI.md).**
-
-### Getting the most out of it
-
-**Talk about the project rather than dictating records.** "We're going with
-Postgres because we already run one" gets you a decision with a reason in it,
-where "Create a decision record titled Postgres" gets you a row that means nothing
-in six months.
-
-**Say why out loud.** What you rejected, and why, is the part you will want later.
-
-**Use the short IDs.** Tasks are `KEEL-42` and decisions are `B-12`, they do not
-change, and they work anywhere an ID is accepted.
-
-**Leave open questions open.** Every session sees them before it starts, which
-stops Claude quietly re-deciding something you settled.
-
----
-
 ## What is in it
 
 Thirteen types, and thirteen is the cap. "We need a new type for this" nearly
@@ -256,10 +184,25 @@ That turns "what is blocked, and by what" into a query.
 
 ---
 
-## Generated files
+## Markdown in your repository
 
-Point a project at your repository and Specline writes markdown into it. A new
-project gets four files:
+Specline can write its documents into your repository as markdown. This is
+optional: nothing in Specline reads the files back, and everything works the
+same without them. The files are for people, and for tools that read the
+repository rather than the store.
+
+What you get from turning it on:
+
+- Specs, decisions and questions you can read with `cat` on a machine that has
+  no Specline.
+- The same text in `grep` and in your editor's search, next to the code it
+  describes.
+- An agent or editor with no MCP connection still sees them.
+
+What it costs: a change in the store shows up as a diff in files nobody edited.
+Commit the files or gitignore them, whichever suits the project.
+
+`specline generate <project>` writes them. A new project gets four files:
 
 ```
 .specline/README.md       what the project is
@@ -268,41 +211,33 @@ project gets four files:
 .specline/manifest.json   what was written, and what it came from
 ```
 
-As documents accumulate, `.specline/specs/` and `.specline/decisions/` fill up
-with one file each, and a document can take a path of its own — tell Specline that
-a spec lives at `docs/SPEC.md` and that is where it goes from then on.
+Specs and decisions get one file each under `.specline/specs/` and
+`.specline/decisions/`. A document can have a path of its own, so a spec can
+live at `docs/SPEC.md` instead.
 
-**These files are output**, and each one says so at the top. The next
-`specline generate` writes over anything you change. To change what they say,
-change the source: ask Claude to rewrite it, or edit it in the app. If you have
-already edited a file by hand and want the words kept, `specline import <file>`
-puts them back as a proper revision.
-
-To catch a hand edit before it lands, put this in `.git/hooks/pre-commit`:
-
-```bash
-#!/bin/sh
-specline generate <your-project> --check
-```
+Each file says at the top that it is generated, and the next run overwrites any
+edit. To change one, change the source: ask Claude, or edit it in the app.
+`specline import <file>` takes a hand edit back into the store as a revision.
+`specline generate <project> --check` fails when a file differs from the store;
+[docs/CLI.md](docs/CLI.md#specline-generate-project) shows how to run it from a
+pre-commit hook.
 
 ---
 
 ## How it is built
 
 Rust, one workspace, six crates, one SQLite file, and a daemon that owns the only
-write path. Search combines FTS5 keyword matching with `sqlite-vec` similarity,
-and every change is an event carrying an author and the conversation it came from.
-Agents reach all of it through
-[thirteen MCP tools](docs/ARCHITECTURE.md#the-mcp-surface), kept few because a
-model picks well from a short list.
+write path. Search is FTS5 for keywords and `sqlite-vec` cosine distance over
+stored embeddings for meaning. Every change is an event that records who made it
+and which conversation it came from. Agents use it through
+[thirteen MCP tools](docs/ARCHITECTURE.md#the-mcp-surface).
 
-Specline is built with Specline. Its own tasks, decisions and open questions
-live in a store on the machine this was written on.
+Specline is built with Specline. Its own tasks, decisions and open questions are
+in a store on the machine it was written on.
 
-**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** has the crate layout, how storage
-works, why the direction of a graph query is the easiest thing to get wrong, and
-what the app may and may not write. **[CONTRIBUTING.md](CONTRIBUTING.md)** covers
-building it yourself.
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** covers the crates, storage,
+graph direction and what the app may write.
+**[CONTRIBUTING.md](CONTRIBUTING.md)** covers building from source.
 
 ---
 

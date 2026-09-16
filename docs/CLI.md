@@ -187,7 +187,13 @@ their recorded paths, the `.specline/` mirror, and the tracker.
 It runs one way only: nothing here reads a generated file back into the store.
 
 `--check` is what a pre-commit hook or CI runs. It turns a hand edit to a
-generated file into a failure someone sees, rather than work someone loses.
+generated file into a failure someone sees, rather than work someone loses. To
+catch one before it lands, put this in `.git/hooks/pre-commit`:
+
+```bash
+#!/bin/sh
+specline generate <your-project> --check
+```
 
 ---
 
