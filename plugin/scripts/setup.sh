@@ -100,14 +100,6 @@ die() {
     exit 1
 }
 
-run() {
-    if [ "$DRY_RUN" = true ]; then
-        info "would run: $*"
-        return 0
-    fi
-    "$@"
-}
-
 # --- 0. is the port already taken, and by what? -----------------------------
 #
 # Asked first, because everything below is wasted if the answer is "something
@@ -250,44 +242,64 @@ fi
 
 step "Preparing the store"
 
+STORE_EXISTS=false
 if [ "$DRY_RUN" = true ]; then
     info "would create or migrate $SPECLINE_HOME_DIR"
-elif [ -f "$SPECLINE_HOME_DIR/keel.sqlite" ]; then
-    # An existing store may be behind this binary. Migrating is the daemon's
-    # precondition, not an optional tidy-up — it refuses to open a store newer
-    # than itself and will not silently upgrade one that is older.
+elif [ -f "$SPECLINE_HOME_DIR/specline.sqlite" ] || [ -f "$SPECLINE_HOME_DIR/keel.sqlite" ]; then
+    # Either name: the file was `keel.sqlite` before the rename, and the daemon
+    # moves an old one to the new name on its first start.
+    #
+    # An existing store may be behind this binary. The daemon migrates it on
+    # open, and `specline migrate` below does the same thing as a separate,
+    # visible step so an upgrade is not something that happens to the store
+    # unannounced while a daemon is starting.
+    STORE_EXISTS=true
     if [ "$ALREADY_RUNNING" = true ]; then
         info "a daemon is holding the store; it will be stopped before migrating"
         stop_daemon_for_migrate=true
     fi
     ok "store exists at $SPECLINE_HOME_DIR"
 else
-    # `--daemon "$DAEMON_URL"`, never the default, and this is the second thing
-    # the first real install got wrong.
+    # Nothing to do here: the daemon creates the store on its first start, and
+    # the check that it did is after the health check below.
     #
-    # Read commands go *through* a daemon when one answers, and `--daemon`
-    # defaults to 127.0.0.1:7654. So on a machine that already runs Specline, this
-    # asked the live daemon about the store it serves, got a cheerful exit 0
-    # about somebody else's data, and created nothing here — then the check
-    # below failed with "the store was not created", which is true and explains
-    # nothing. Pointing it at the port being set up means it opens this store
-    # directly when nothing is listening, which is the case on a clean machine
-    # and the case that matters.
-    run "$specline_bin" --home "$SPECLINE_HOME_DIR" fsck --daemon "$DAEMON_URL" >/dev/null 2>&1
-    if [ -f "$SPECLINE_HOME_DIR/keel.sqlite" ]; then
-        ok "store created at $SPECLINE_HOME_DIR"
-    else
-        die "the store was not created at $SPECLINE_HOME_DIR" \
-            "The daemon creates one on first start, so this is recoverable —" \
-            "but something is wrong if opening it directly did not."
-    fi
+    # This step used to run `specline fsck` to make the store, which worked
+    # only because a read that found no store created an empty one. KEEL-137
+    # stopped reads doing that — the empty store they left behind was the bug —
+    # and this step went on relying on it, so from then on every fresh install
+    # died here with "the store was not created". Nobody saw it because every
+    # machine that ran the script already had a store. A tester on a clean Mac
+    # did, on 0.5.1.
+    info "no store yet; the daemon creates one on first start"
 fi
 
 # --- 3. stop anything already running, then migrate -------------------------
 
 if [ "$DRY_RUN" = false ] && [ "$ALREADY_RUNNING" = true ]; then
     step "Stopping the running daemon"
-    pkill -f "specline-daemon" 2>/dev/null
+    # The one serving this directory, by the pid it wrote to daemon.json, and
+    # through the service manager when that is what owns it — a plain kill of
+    # a launchd job with KeepAlive is undone two seconds later.
+    #
+    # This was `pkill -f specline-daemon`, which matches every process with
+    # that string anywhere on its command line. Run against a scratch home on
+    # a spare port on 2026-09-16, it stopped the real daemon on 7654 as well,
+    # and the rustc compiling specline-daemon in a build next door.
+    pid="$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$SPECLINE_HOME_DIR/daemon.json" 2>/dev/null)"
+    if [ -z "$pid" ]; then
+        die "a daemon answers on $PORT but $SPECLINE_HOME_DIR/daemon.json does not say which process it is." \
+            "It may be serving a different directory. Stop it yourself and run this again."
+    fi
+    launchd_pid="$(launchctl print "gui/$(id -u)/sh.specline.daemon" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\).*/\1/p')"
+    systemd_pid="$(systemctl --user show -p MainPID --value specline.service 2>/dev/null)"
+    if [ "$pid" = "$launchd_pid" ]; then
+        launchctl bootout "gui/$(id -u)/sh.specline.daemon" 2>/dev/null
+    elif [ "$pid" = "$systemd_pid" ]; then
+        systemctl --user stop specline.service 2>/dev/null
+    else
+        kill "$pid" 2>/dev/null
+    fi
     for _ in $(seq 1 10); do
         curl -sf --max-time 1 "$DAEMON_URL/api/health" >/dev/null 2>&1 || break
         sleep 1
@@ -295,7 +307,7 @@ if [ "$DRY_RUN" = false ] && [ "$ALREADY_RUNNING" = true ]; then
     ok "stopped"
 fi
 
-if [ "$DRY_RUN" = false ]; then
+if [ "$DRY_RUN" = false ] && [ "$STORE_EXISTS" = true ]; then
     step "Applying migrations"
     if "$specline_bin" --home "$SPECLINE_HOME_DIR" migrate --daemon "$DAEMON_URL" >/dev/null 2>&1; then
         ok "store is at the schema this binary ships"
@@ -441,6 +453,16 @@ else
     else
         die "the daemon did not answer within 20 seconds." \
             "Log: $SPECLINE_HOME_DIR/daemon.log"
+    fi
+
+    # The daemon that answered should be the one serving this directory. A
+    # daemon on this port with a different --home answers /api/health just as
+    # happily, and the file not appearing is the only way to tell.
+    if [ -f "$SPECLINE_HOME_DIR/specline.sqlite" ]; then
+        ok "store at $SPECLINE_HOME_DIR/specline.sqlite"
+    else
+        die "the daemon answered, but there is no store at $SPECLINE_HOME_DIR/specline.sqlite." \
+            "It may be serving a different directory. Log: $SPECLINE_HOME_DIR/daemon.log"
     fi
 fi
 
