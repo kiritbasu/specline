@@ -6,14 +6,16 @@
 
 This file is loaded automatically into every Claude Code session in this repo. It is the contract. `product/HANDOFF.md` is orientation you read once; this is what you follow every time.
 
+It assumes the Specline store on KB's machine. Every `product/` and `.specline/` file named below is generated from that store and is not tracked in git, so on a fresh clone run `specline generate specline` before the ritual expects to read one. On a clone with no store there is nothing to generate and nothing for the daemon to serve; what still applies is the engineering standards, graph direction and hard constraints.
+
 ---
 
 ## Session ritual
 
 **At the start of every session, in this order:**
 
-1. Read `product/STATUS.md`. It tells you the current phase, what's in progress, and what's blocked. It carries **open work only** — what has closed is in `product/CHANGELOG.md` beside it, which you read when you want history rather than orientation. Both are rendered from the rows; read them, never edit them.
-2. Read `.specline/questions.md`. It has two halves and you need both. **Open** is undecided: nothing there may be built on without saying so, and anything marked `blocked` halts work that depends on it. **Settled** is decided, with the reasoning — do not re-litigate it. Both halves are generated from the question rows, so there is nothing to keep in step.
+1. Call `specline_context`, or read `product/STATUS.md`, which is the same information as a file. Either tells you the current phase, what's in progress, and what's blocked. Both carry **open work only** — what has closed is in `product/CHANGELOG.md`, which you read when you want history rather than orientation. The files are rendered from the rows; read them, never edit them.
+2. Read the questions. `specline_context` carries every open one; `.specline/questions.md` has the settled ones as well, and you need both halves. **Open** is undecided: nothing there may be built on without saying so, and anything marked `blocked` halts work that depends on it. **Settled** is decided, with the reasoning — do not re-litigate it. Both halves are generated from the question rows, so there is nothing to keep in step.
 3. `git log --oneline -15` — see what the last session actually did.
 4. State in one line what you're picking up before you touch anything, and `specline_claim` it. `specline_next` is what to ask if the tracker leaves the choice open. **If it has no row — because it arrived as a sentence rather than out of the tracker — create one first.** That applies again every time the work changes during the session, not only at the start.
 
@@ -227,7 +229,7 @@ The first draft of the spec had **both** graph traversals inverted. This is the 
 
 Rules:
 
-- `product/SPEC.md` §3.3 has the normative direction table. It is the only authority. Read it every time.
+- `product/SPEC.md` §3.3 has the normative direction table, and `docs/ARCHITECTURE.md` carries the same table for anyone without the store. Read it every time.
 - `blocks` and `depends_on` are inverses. Only `blocks` is ever stored; `specline-core` swaps the endpoints on write. Never store both.
 - Every relation gets an explicit test asserting what it returns traversing **outbound** and what it returns traversing **inbound**.
 - Any query returning an empty graph result in development gets treated as a suspected direction bug until proven otherwise.
