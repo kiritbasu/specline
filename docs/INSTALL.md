@@ -44,6 +44,11 @@ binary the running process, and the siblings resolve.
 Use a directory that is on your `PATH`; `~/.local/bin` is common but not
 universal, and `echo $PATH` settles it.
 
+The same wrapper is the answer if `command -v codex` finds an older install
+from npm or Homebrew. The desktop app's bundled binary is usually newer, and
+the two `--version` outputs tell you which you have. The MCP step below needs
+one that knows `--url`.
+
 ### 1. Start the daemon
 
 This is the same script `/specline:setup` runs, and it does not care which editor
@@ -197,7 +202,10 @@ From a clone it is `./plugin/scripts/uninstall.sh` with the same flags, and
 
 **Your store is kept.** `~/.specline` holds every decision, question and note
 Specline has recorded, nothing else on disk has a copy of it, and reinstalling
-picks it up where it was. Removing it takes a separate flag:
+picks it up where it was. If the schema has moved in between, the daemon
+migrates the store forward on its first start; there is no separate step and
+nothing to reset. The other direction is refused: a binary older than the
+store will not open it. Removing the store takes a separate flag:
 
 ```bash
 curl -fsSL https://github.com/kiritbasu/specline/releases/latest/download/specline-uninstall.sh | sh -s -- --purge
