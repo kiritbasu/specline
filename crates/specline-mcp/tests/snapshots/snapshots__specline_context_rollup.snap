@@ -16,6 +16,7 @@ expression: result
     "budget_exceeded": false,
     "complete": [],
     "decisions": [],
+    "drift": null,
     "environments": [],
     "estimated_tokens": 77,
     "inbox": [],

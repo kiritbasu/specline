@@ -18,13 +18,15 @@
 //! live on its own.
 
 pub mod dispatch;
+pub mod git;
 pub mod image_roots;
 pub mod links;
 pub mod protocol;
 pub mod tools;
 
 pub use dispatch::{
-    ToolCall, dispatch, dispatch_prepared, entity_json, payload, resolve_project, to_rpc_error,
+    Prepared, ToolCall, dispatch, dispatch_prepared, entity_json, payload, resolve_project,
+    to_rpc_error,
 };
 pub use protocol::{
     HeaderCheck, PROTOCOL_VERSION, Request, Response, RpcError, check_headers, codes,

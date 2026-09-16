@@ -1246,6 +1246,16 @@ impl EntityQuery {
     }
 
     /// Cap the result count.
+    /// Read soft-deleted rows too. For the callers that need a row to keep
+    /// owning its identity after it is set aside — a task's number is still
+    /// that task's, archived or not, and a query that cannot see it will call
+    /// a commit naming it a commit naming nothing.
+    pub fn including_archived(mut self) -> Self {
+        self.include_archived = true;
+        self
+    }
+
+    /// Return at most this many rows.
     pub fn limited(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self

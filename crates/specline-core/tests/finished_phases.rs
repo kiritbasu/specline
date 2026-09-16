@@ -115,6 +115,7 @@ impl Fixture {
             Depth::Standard,
             None,
             Surfaces::all(),
+            specline_core::drift::Source::NoCheckout,
         )
         .unwrap()
     }
@@ -222,6 +223,7 @@ fn cutting_the_section_reports_what_it_dropped() {
         Depth::Brief,
         None,
         Surfaces::all(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     assert_eq!(digest.complete.len(), 3);

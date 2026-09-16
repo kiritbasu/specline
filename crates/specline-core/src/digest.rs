@@ -20,12 +20,38 @@
 //! `budget_exceeded`. That is not a failure — it is the store telling you the
 //! open-question register needs pruning, which is real information.
 
+use crate::drift::{self, Drift};
 use crate::store::EventScope;
 use crate::{
     Cursor, Entity, EntityId, EntityQuery, EntityStore, EntityType, QuestionStatus, Result, Store,
     TaskStatus,
 };
 use serde::Serialize;
+
+/// The repository half of the digest: the join between commits and rows.
+///
+/// Two states and an absence. `None` on the roll-up and on a project with no
+/// checkout, where there is nothing to measure. `Unreadable` when there is a
+/// checkout and git could not read it — carried, and rendered, so a broken
+/// git does not look like a quiet week. `Measured` is the reconciliation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DriftSection {
+    /// The checkout could not be read, and this is why.
+    Unreadable {
+        /// What went wrong, as the caller reported it.
+        reason: String,
+    },
+    /// The reconciliation.
+    Measured(Drift),
+}
+
+/// How many of each drift list the prose shows before saying "and N more".
+///
+/// Five, because the section is a prompt to look rather than the place to
+/// look: the JSON carries every row, and a session that wants the sixth
+/// unlinked commit is reading the structured half anyway.
+const DRIFT_SHOWN: usize = 5;
 
 /// How much to include.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,6 +241,15 @@ pub struct Digest {
     /// The counts in `next` restate the problem; this names the task. See
     /// [`crate::next`] for the ranking.
     pub next_up: Option<NextUpJson>,
+    /// The commits since the window started, reconciled against the rows.
+    ///
+    /// `None` means there was nothing to measure — the roll-up, or a project
+    /// with no `root_path`. It never means "measured and found nothing"; that
+    /// is a [`DriftSection::Measured`] with empty lists, and a checkout that
+    /// could not be read is [`DriftSection::Unreadable`] with the reason.
+    /// Three answers for three situations, because the project's own bug
+    /// class is the empty result that reads as calm.
+    pub drift: Option<DriftSection>,
     /// What was cut.
     pub truncated: Vec<Truncation>,
     /// Set when the unbounded sections alone exceed the budget.
@@ -372,6 +407,17 @@ impl Digest {
             }
         }
 
+        match &self.drift {
+            None => {}
+            Some(DriftSection::Unreadable { reason }) => {
+                out.push_str(&format!(
+                    "\n## Commits\nNot measured: {reason}. The project has a checkout \
+                     recorded and its history could not be read.\n"
+                ));
+            }
+            Some(DriftSection::Measured(d)) => drift_prose(&mut out, d),
+        }
+
         if !self.next.is_empty() {
             out.push_str("\n## Also worth noticing\n");
             for line in &self.next {
@@ -397,6 +443,84 @@ impl Digest {
         }
 
         out
+    }
+}
+
+/// The commits section: one line of counts, then the two lists that are the
+/// point, each cut at [`DRIFT_SHOWN`] and saying so.
+fn drift_prose(out: &mut String, d: &Drift) {
+    out.push_str(&format!(
+        "\n## Commits since {}\n",
+        d.since.format("%Y-%m-%d")
+    ));
+    if d.commits == 0 {
+        out.push_str("None.");
+    } else if d.commits < d.commits_total {
+        out.push_str(&format!(
+            "{} commit(s), of which the newest {} were read: {} name a task, {} name none.",
+            d.commits_total,
+            d.commits,
+            d.linked.len(),
+            d.unlinked.len()
+        ));
+    } else {
+        out.push_str(&format!(
+            "{} commit(s): {} name a task, {} name none.",
+            d.commits,
+            d.linked.len(),
+            d.unlinked.len()
+        ));
+    }
+    if !d.done_without_commit.is_empty() {
+        out.push_str(&format!(
+            " {} task(s) closed done with no commit behind them.",
+            d.done_without_commit.len()
+        ));
+    }
+    if !d.unknown.is_empty() {
+        out.push_str(&format!(
+            " {} commit(s) name a task that does not exist.",
+            d.unknown.len()
+        ));
+    }
+    out.push('\n');
+
+    for c in d.unlinked.iter().take(DRIFT_SHOWN) {
+        out.push_str(&format!("- {} {} — no task\n", c.sha, c.subject));
+    }
+    if d.unlinked.len() > DRIFT_SHOWN {
+        out.push_str(&format!(
+            "- …and {} more commit(s) naming no task\n",
+            d.unlinked.len() - DRIFT_SHOWN
+        ));
+    }
+    for t in d.done_without_commit.iter().take(DRIFT_SHOWN) {
+        out.push_str(&format!(
+            "- {} {} — closed done, no commit cited\n",
+            t.reference, t.title
+        ));
+    }
+    if d.done_without_commit.len() > DRIFT_SHOWN {
+        out.push_str(&format!(
+            "- …and {} more task(s) closed done with no commit\n",
+            d.done_without_commit.len() - DRIFT_SHOWN
+        ));
+    }
+    for u in d.unknown.iter().take(DRIFT_SHOWN) {
+        out.push_str(&format!("- {} names {}, which has no row\n", u.sha, u.key));
+    }
+    if d.unknown.len() > DRIFT_SHOWN {
+        out.push_str(&format!(
+            "- …and {} more commit(s) naming a task that does not exist\n",
+            d.unknown.len() - DRIFT_SHOWN
+        ));
+    }
+    if d.tasks_scanned < d.tasks_total {
+        out.push_str(&format!(
+            "Only the newest {} of {} task rows were read, so a commit naming an older task \
+             is reported above as naming one that does not exist.\n",
+            d.tasks_scanned, d.tasks_total
+        ));
     }
 }
 
@@ -439,6 +563,7 @@ pub fn build(
     depth: Depth,
     since: Option<chrono::DateTime<chrono::Utc>>,
     surfaces: Surfaces,
+    repository: drift::Source<'_>,
 ) -> Result<Digest> {
     let limit = depth.section_limit();
 
@@ -457,6 +582,7 @@ pub fn build(
         environments: Vec::new(),
         next: Vec::new(),
         next_up: None,
+        drift: None,
         truncated: Vec::new(),
         budget_exceeded: false,
         estimated_tokens: 0,
@@ -607,6 +733,19 @@ pub fn build(
                     total: total_ready,
                 });
             }
+            digest.drift = match repository {
+                drift::Source::NoCheckout => None,
+                drift::Source::Unreadable(reason) => Some(DriftSection::Unreadable {
+                    reason: reason.to_owned(),
+                }),
+                drift::Source::Commits {
+                    since,
+                    commits,
+                    total,
+                } => Some(DriftSection::Measured(drift::reconcile(
+                    store, project_id, commits, total, since,
+                )?)),
+            };
             digest.next = suggestions(&line, &digest);
             digest.next_up = Some(next_up);
             digest.project = Some(line);
@@ -1119,6 +1258,28 @@ fn suggestions(line: &ProjectLine, digest: &Digest) -> Vec<String> {
                 .to_owned(),
         );
     }
+    // The drift number, where the agent reads. The section itself sits below
+    // the glossary; this line is what makes it noticed, and it is the one
+    // number the contract measured by hand and could not keep measuring.
+    if let Some(DriftSection::Measured(d)) = &digest.drift {
+        if !d.unlinked.is_empty() {
+            out.push(format!(
+                "{} of {} commit(s) since {} name no task. Every commit should have a row \
+                 behind it — see the Commits section.",
+                d.unlinked.len(),
+                d.commits,
+                d.since.format("%Y-%m-%d")
+            ));
+        }
+        if !d.done_without_commit.is_empty() {
+            out.push(format!(
+                "{} task(s) closed done since {} with no commit or PR cited. Closing with \
+                 `commit:` evidence is what makes the changelog answer \"what shipped\".",
+                d.done_without_commit.len(),
+                d.since.format("%Y-%m-%d")
+            ));
+        }
+    }
     if line.urgent_tasks == 0 && line.open_tasks > 0 {
         out.push(
             "Nothing is marked p0 or p1. If something is actually urgent, say so on the task."
@@ -1273,6 +1434,7 @@ mod tests {
             truncated: vec![],
             budget_exceeded: false,
             estimated_tokens: 0,
+            drift: None,
         };
 
         for section in ["recent", "questions", "terms"] {
@@ -1303,6 +1465,7 @@ mod tests {
             truncated: vec![],
             budget_exceeded: false,
             estimated_tokens: 0,
+            drift: None,
         };
         trim_section(&mut d, "recent");
         assert_eq!(d.truncated.len(), 1);

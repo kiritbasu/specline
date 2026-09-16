@@ -478,6 +478,16 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
             // other request waits on the store. Done here, before the lock, so
             // the critical section is two SQL queries.
             let query_vector = state.embed_query(name, request.arguments());
+            // The project's git log is the other thing a read path does that
+            // is not SQL. Two row reads under the lock to learn where and
+            // since when, then the process itself with the lock released — a
+            // checkout on a slow mount costs this request, not every request.
+            let repository = (name == "specline_context").then(|| {
+                let store = state.store();
+                let plan = specline_mcp::git::Plan::for_context(&store, request.arguments());
+                drop(store);
+                plan.read()
+            });
 
             let mut store = state.store();
             let before = latest_event(&store);
@@ -488,7 +498,10 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
                     arguments: request.arguments(),
                     client: caller.as_ref(),
                 },
-                query_vector,
+                specline_mcp::Prepared {
+                    query_vector,
+                    repository,
+                },
             );
             // Announce after the lock is released, so a slow subscriber can
             // never hold the write handle.
@@ -1609,13 +1622,24 @@ async fn api_context(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     let args = params_to_json("specline_context", params);
+    // Same two-step as the MCP path: git runs with the lock released.
+    let repository = {
+        let store = state.store();
+        let plan = specline_mcp::git::Plan::for_context(&store, &args);
+        drop(store);
+        plan.read()
+    };
     let mut store = state.store();
-    as_api(specline_mcp::dispatch(
+    as_api(specline_mcp::dispatch_prepared(
         &mut store,
         specline_mcp::ToolCall {
             name: "specline_context",
             arguments: &args,
             client: None,
+        },
+        specline_mcp::Prepared {
+            query_vector: None,
+            repository: Some(repository),
         },
     ))
 }

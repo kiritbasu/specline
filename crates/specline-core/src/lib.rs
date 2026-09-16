@@ -29,6 +29,7 @@ pub mod changes;
 pub mod chunk;
 pub mod digest;
 pub mod document;
+pub mod drift;
 pub mod embed;
 pub mod entity;
 pub mod enums;

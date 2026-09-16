@@ -259,6 +259,60 @@ export interface Truncation {
   total: number;
 }
 
+/** A commit that reached a task row, and which ones. */
+export interface LinkedCommit {
+  sha: string;
+  subject: string;
+  /** `KEEL-42`, one per row the commit named or was cited by. */
+  tasks: string[];
+}
+
+/** A commit that reached no row: the drift. */
+export interface UnlinkedCommit {
+  sha: string;
+  subject: string;
+  committed_at: string;
+}
+
+/** A commit naming a key that has no row behind it. */
+export interface UnknownKey {
+  sha: string;
+  key: string;
+}
+
+/** A task closed `done` in the window with no commit or pull request behind it. */
+export interface DoneWithoutCommit {
+  reference: string;
+  id: string;
+  title: string;
+  closed_at: string;
+}
+
+/** The join between the repository's commits and the task rows, over one window. */
+export interface Drift {
+  since: string;
+  /** How many commits were read — the newest, up to the daemon's cap. */
+  commits: number;
+  /** How many the window held. Greater than `commits` only when the read was capped. */
+  commits_total: number;
+  linked: LinkedCommit[];
+  unlinked: UnlinkedCommit[];
+  unknown: UnknownKey[];
+  done_without_commit: DoneWithoutCommit[];
+  /** Unequal to `tasks_total` only when the scan was capped — then the lists are incomplete. */
+  tasks_scanned: number;
+  tasks_total: number;
+}
+
+/**
+ * Three answers, not two. `null` on the digest means nothing to measure — no
+ * checkout recorded. `unreadable` means there is one and git could not read
+ * it, which must never look like a quiet week. `measured` is the join.
+ */
+export type DriftSection =
+  | ({ state: "measured" } & Drift)
+  | { state: "unreadable"; reason: string };
+
 export interface Digest {
   project: ProjectLine | null;
   projects: ProjectLine[];
@@ -272,6 +326,8 @@ export interface Digest {
   environments: DigestItem[];
   next: string[];
   next_up: NextUp | null;
+  /** Absent on the roll-up and on a project with no `root_path`. */
+  drift?: DriftSection | null;
   truncated: Truncation[];
   budget_exceeded: boolean;
   estimated_tokens: number;

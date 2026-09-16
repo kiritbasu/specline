@@ -6,7 +6,7 @@
  * project, one of them is wrong and nobody knows which.
  */
 
-import { api, type Digest } from "../lib/api";
+import { api, type Digest, type DriftSection } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { Badge, Card, Empty, ErrorBox, Id, Spinner, Stat, statusTone } from "../components/ui";
 import { Page, projectCrumbs } from "../components/Page";
@@ -55,6 +55,8 @@ export function ProjectScreen({ route, generation }: ScreenProps) {
               what an agent reads, in a unit only an agent has — a token count
               on a human's dashboard is a number nobody can act on. */}
         </div>
+
+        {data.drift && <DriftCard drift={data.drift} project={project} />}
 
         <div className="grid gap-5 lg:grid-cols-2">
           <Card
@@ -263,5 +265,132 @@ export function ProjectScreen({ route, generation }: ScreenProps) {
         )}
       </div>
     </Page>
+  );
+}
+
+/** How many of each list the card shows before saying how many it cut. */
+const DRIFT_SHOWN = 5;
+
+/**
+ * The join between the repository and the rows: what landed this week with no
+ * task behind it, and what closed with nothing landing.
+ *
+ * Rendered only when the digest carries the section, so a project with no
+ * checkout has no card rather than an empty one. An unreadable checkout is a
+ * card that says so — the one state this must never collapse into is "no
+ * commits", because a broken git and a quiet week would then look the same.
+ */
+function DriftCard({ drift, project }: { drift: DriftSection; project: string }) {
+  if (drift.state === "unreadable") {
+    return (
+      <Card title="Commits">
+        <p className="text-small text-warn">Not measured: {drift.reason}</p>
+        <p className="mt-1.5 text-small text-ink-faint">
+          The project has a checkout recorded and its history could not be read.
+        </p>
+      </Card>
+    );
+  }
+
+  const since = drift.since.slice(0, 10);
+  const cut = (shown: number, total: number, what: string) =>
+    total > shown ? (
+      <li className="text-small text-ink-faint">
+        …and {total - shown} more {what}
+      </li>
+    ) : null;
+
+  return (
+    <Card title={`Commits since ${since}`}>
+      <div className="flex gap-8">
+        <Stat
+          value={drift.commits_total}
+          label={drift.commits < drift.commits_total ? `commits, newest ${drift.commits} read` : "commits"}
+        />
+        <Stat value={drift.linked.length} label="name a task" />
+        <Stat
+          value={drift.unlinked.length}
+          label="name none"
+          tone={drift.unlinked.length ? "text-warn" : undefined}
+        />
+        <Stat
+          value={drift.done_without_commit.length}
+          label="done, no commit"
+          tone={drift.done_without_commit.length ? "text-warn" : undefined}
+        />
+      </div>
+
+      {drift.commits === 0 && drift.done_without_commit.length === 0 ? (
+        <p className="mt-4 text-small text-ink-faint">Nothing landed and nothing closed.</p>
+      ) : (
+        <div className="mt-4 grid gap-5 lg:grid-cols-2">
+          <div>
+            <h3 className="mb-1.5 text-small font-semibold tracking-wide text-ink-muted uppercase">
+              Commits naming no task
+            </h3>
+            {drift.unlinked.length === 0 ? (
+              <p className="text-small text-ink-faint">Every commit reached a row.</p>
+            ) : (
+              <ul className="space-y-1.5 text-small">
+                {drift.unlinked.slice(0, DRIFT_SHOWN).map((c) => (
+                  <li key={c.sha} className="flex min-w-0 items-baseline gap-2">
+                    {/* Not `Id`: that breaks anywhere to fit, and beside a
+                        truncating subject it split a seven-character sha over
+                        two lines on the live dashboard. */}
+                    <code className="selectable shrink-0 font-mono text-micro text-ink-faint">
+                      {c.sha}
+                    </code>
+                    <span className="selectable truncate">{c.subject}</span>
+                  </li>
+                ))}
+                {cut(DRIFT_SHOWN, drift.unlinked.length, "commit(s)")}
+              </ul>
+            )}
+          </div>
+          <div>
+            <h3 className="mb-1.5 text-small font-semibold tracking-wide text-ink-muted uppercase">
+              Closed done with no commit
+            </h3>
+            {drift.done_without_commit.length === 0 ? (
+              <p className="text-small text-ink-faint">Every closed task cites one.</p>
+            ) : (
+              <ul className="space-y-1.5 text-small">
+                {drift.done_without_commit.slice(0, DRIFT_SHOWN).map((t) => (
+                  <li key={t.id}>
+                    <a
+                      href={href({ screen: "task", project, taskId: t.reference })}
+                      className="flex min-w-0 items-baseline gap-2 hover:underline"
+                    >
+                      <span className="shrink-0 font-mono text-micro text-ink-faint">
+                        {t.reference}
+                      </span>
+                      <span className="truncate">{t.title}</span>
+                    </a>
+                  </li>
+                ))}
+                {cut(DRIFT_SHOWN, drift.done_without_commit.length, "task(s)")}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {drift.unknown.length > 0 && (
+        <p className="mt-3 text-small text-ink-faint">
+          {drift.unknown.length} commit(s) name a task that does not exist:{" "}
+          {drift.unknown
+            .slice(0, DRIFT_SHOWN)
+            .map((u) => `${u.key} (${u.sha})`)
+            .join(", ")}
+          {drift.unknown.length > DRIFT_SHOWN && ", …"}
+        </p>
+      )}
+      {drift.tasks_scanned < drift.tasks_total && (
+        <p className="mt-3 text-small text-warn">
+          Only the newest {drift.tasks_scanned} of {drift.tasks_total} task rows were read, so a
+          commit naming an older task is reported above as naming one that does not exist.
+        </p>
+      )}
+    </Card>
   );
 }

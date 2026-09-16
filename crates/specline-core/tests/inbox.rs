@@ -165,6 +165,7 @@ fn the_digest_says_how_many_signals_are_waiting() {
         Depth::Standard,
         None,
         Surfaces::all(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     assert_eq!(quiet.project.as_ref().unwrap().inbox, 0);
@@ -183,6 +184,7 @@ fn the_digest_says_how_many_signals_are_waiting() {
         Depth::Standard,
         None,
         Surfaces::all(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     let line = built.project.as_ref().unwrap();
@@ -227,6 +229,7 @@ fn the_digest_lists_the_oldest_signals_and_says_how_many_it_left() {
         Depth::Standard,
         None,
         Surfaces::all(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     assert_eq!(built.inbox.len(), 8, "a small slice, not the whole pile");
@@ -272,6 +275,7 @@ fn a_listed_signal_carries_its_source_and_its_age() {
         Depth::Standard,
         None,
         Surfaces::all(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     let detail = built.inbox[0].detail.as_deref().unwrap_or_default();
@@ -747,6 +751,7 @@ fn switching_the_inbox_off_hides_it_from_the_digest_and_keeps_the_signals() {
         Depth::Standard,
         None,
         Surfaces::default(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     assert!(off.inbox.is_empty(), "no section");
@@ -768,6 +773,7 @@ fn switching_the_inbox_off_hides_it_from_the_digest_and_keeps_the_signals() {
         Depth::Standard,
         None,
         Surfaces::all(),
+        specline_core::drift::Source::NoCheckout,
     )
     .unwrap();
     assert_eq!(on.inbox.len(), 2);

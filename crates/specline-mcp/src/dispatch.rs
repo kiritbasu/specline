@@ -403,7 +403,23 @@ pub fn payload(result: &Value) -> Value {
 
 /// Execute a tool call.
 pub fn dispatch(store: &mut Store, call: ToolCall<'_>) -> Result<Value, RpcError> {
-    dispatch_prepared(store, call, None)
+    dispatch_prepared(store, call, Prepared::default())
+}
+
+/// Work a caller did before taking the store lock.
+///
+/// Two things on the read path cost real time and need nothing from the
+/// store while they run: embedding a search query, and reading a project's
+/// git log. A caller that holds the store behind a mutex does both first,
+/// so the critical section is only the SQL. Everything is optional, and a
+/// tool that finds its field empty does the work itself — the daemon
+/// prepares, the CLI and the tests do not have to.
+#[derive(Debug, Default)]
+pub struct Prepared {
+    /// The embedded query, for `specline_search`.
+    pub query_vector: Option<Vec<f32>>,
+    /// The project's commits, for `specline_context`.
+    pub repository: Option<crate::git::Read>,
 }
 
 /// Execute a tool call with the search query already embedded.
@@ -418,12 +434,12 @@ pub fn dispatch(store: &mut Store, call: ToolCall<'_>) -> Result<Value, RpcError
 pub fn dispatch_prepared(
     store: &mut Store,
     call: ToolCall<'_>,
-    query_vector: Option<Vec<f32>>,
+    prepared: Prepared,
 ) -> Result<Value, RpcError> {
     let args = call.arguments;
     match call.name {
-        "specline_context" => specline_context(store, args),
-        "specline_search" => specline_search(store, args, query_vector),
+        "specline_context" => specline_context(store, args, prepared.repository),
+        "specline_search" => specline_search(store, args, prepared.query_vector),
         "specline_get" => specline_get(store, args),
         "specline_projects" => specline_projects(store, args),
         "specline_activity" => specline_activity(store, args),
@@ -455,7 +471,11 @@ pub fn dispatch_prepared(
     }
 }
 
-fn specline_context(store: &Store, args: &Value) -> Result<Value, RpcError> {
+fn specline_context(
+    store: &Store,
+    args: &Value,
+    repository: Option<crate::git::Read>,
+) -> Result<Value, RpcError> {
     // `cwd` resolves to a project by its recorded `root_path`, and — more
     // importantly — says plainly when nothing matches. TQ-17: nine of ten gate
     // sessions called this, saw a roll-up listing some *other* project, and
@@ -474,8 +494,27 @@ fn specline_context(store: &Store, args: &Value) -> Result<Value, RpcError> {
     .map_err(|e| RpcError::new(codes::INVALID_PARAMS, e))?;
     let since = opt_time(args, "since")?;
 
-    let digest = specline_core::digest::build(store, project.as_ref(), depth, since, surfaces())
-        .map_err(|e| to_rpc_error(store, e))?;
+    // The repository half, lent to the digest. A caller holding a lock read
+    // it before taking the lock (see `Prepared`); anyone else reads it now.
+    // `since` is the caller's window if they gave one, else a week back, and
+    // `drift::window` is the one place that rule lives.
+    let repository = match repository {
+        Some(read) => read,
+        None => match project.as_ref() {
+            Some(id) => crate::git::Plan::for_project(store, id, since).read(),
+            None => crate::git::Read::NoCheckout,
+        },
+    };
+
+    let digest = specline_core::digest::build(
+        store,
+        project.as_ref(),
+        depth,
+        since,
+        surfaces(),
+        repository.source(),
+    )
+    .map_err(|e| to_rpc_error(store, e))?;
 
     let unmatched = cwd.as_deref().filter(|_| matched_by_cwd.is_none());
 
@@ -554,7 +593,7 @@ fn normalise_path(path: &str) -> String {
 ///
 /// Longest `root_path` wins, so a project nested inside another checkout
 /// resolves to the inner one rather than whichever happened to be listed first.
-fn project_for_directory(store: &Store, dir: &str) -> Option<EntityId> {
+pub(crate) fn project_for_directory(store: &Store, dir: &str) -> Option<EntityId> {
     let dir = normalise_path(dir);
     let dir = dir.as_str();
     let page = store
@@ -1009,13 +1048,7 @@ const MAX_FILE_BYTES: usize = 10 * 1_048_576;
 /// base64 for the case the path argument exists to serve.
 fn image_roots_for(store: &Store, project: Option<&EntityId>) -> Vec<std::path::PathBuf> {
     let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-    let project_root = project
-        .and_then(|id| store.get(id).ok().flatten())
-        .and_then(|entity| match entity {
-            Entity::Project(project) => project.root_path,
-            _ => None,
-        })
-        .map(std::path::PathBuf::from);
+    let project_root = project.and_then(|id| crate::git::project_root(store, id));
 
     crate::image_roots::roots(home.as_deref(), project_root.as_deref())
 }
