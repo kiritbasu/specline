@@ -150,12 +150,15 @@ jobs:
       #
       # `npm run build` is `tsc --noEmit && vite build` — a type error fails the
       # release, which is the right moment for it to.
+      # No `cache: npm`. This job runs on the self-hosted runner, whose own
+      # `~/.npm` already is the cache, and `setup-node`'s post step would pack
+      # that whole directory — 6.3 GB on the machine it lives on — and upload
+      # it to GitHub. Both 0.6.0 attempts sat in that step for half an hour
+      # with the archive built and nothing published.
       - name: Install Node
         uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Install the site's dependencies
         # `ci`, not `install`: it installs exactly the lockfile and fails if
