@@ -447,10 +447,16 @@ jobs:
 
           # An archive missing here is a platform silently absent from the
           # release, which reads to a downloader as "not supported yet" rather
-          # than as a broken build.
+          # than as a broken build. The expected count is read from
+          # `dist-workspace.toml`, so changing the target list there is enough:
+          # this was a literal 3, the list went to one target (KEEL-377), and
+          # the first release after that failed here with the archive built
+          # and nothing published.
+          expected="$(grep -E '^targets *=' "$GITHUB_WORKSPACE/dist-workspace.toml" \
+            | grep -o '"[^"]*"' | wc -l | tr -d ' ')"
           archives="$(grep -c '/specline-[^/]*\.tar\.' "$list" || true)"
-          if [ "$archives" -ne 3 ]; then
-            echo "expected 3 archives in the release, found $archives:" >&2
+          if [ "$expected" -lt 1 ] || [ "$archives" -ne "$expected" ]; then
+            echo "expected $expected archives in the release, found $archives:" >&2
             cat "$list" >&2
             exit 1
           fi
