@@ -111,22 +111,38 @@ impl Plan {
     /// real error a moment later. Likewise a `since` that does not parse
     /// falls back to the default window; the tool will refuse it properly.
     pub fn for_context(store: &Store, args: &Value) -> Plan {
+        // A session in a linked worktree is on the worktree's branch, so its
+        // commits are read there rather than in the main checkout the project
+        // is recorded at — otherwise the drift section would report main's
+        // commits to a session that made none of them (KEEL-401).
+        let cwd = args.get("cwd").and_then(Value::as_str);
+        if args.get("project").is_none()
+            && let Some((_, worktree)) =
+                cwd.and_then(|d| crate::dispatch::worktree_for_directory(store, d))
+        {
+            return Plan {
+                root: Some(worktree),
+                since: Self::window(args),
+            };
+        }
         let project = match args.get("project").and_then(Value::as_str) {
             Some(p) => crate::resolve_project(store, p).ok(),
-            None => args
-                .get("cwd")
-                .and_then(Value::as_str)
-                .and_then(|d| crate::dispatch::project_for_directory(store, d)),
+            None => cwd.and_then(|d| crate::dispatch::project_for_directory(store, d)),
         };
+        Plan {
+            root: project.and_then(|id| project_root(store, &id)),
+            since: Self::window(args),
+        }
+    }
+
+    /// The reconciliation window from a call's `since`, or the default.
+    fn window(args: &Value) -> DateTime<Utc> {
         let since = args
             .get("since")
             .and_then(Value::as_str)
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|t| t.with_timezone(&Utc));
-        Plan {
-            root: project.and_then(|id| project_root(store, &id)),
-            since: drift::window(since, specline_core::now()),
-        }
+        drift::window(since, specline_core::now())
     }
 
     /// A plan for one project, for callers that already know which.

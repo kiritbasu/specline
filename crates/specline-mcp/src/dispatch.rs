@@ -23,6 +23,7 @@ use specline_core::{
     Artifact, Decision, Design, Environment, Feedback, Metric, MetricObservation, Milestone,
     Project, Question, Spec, Store, Task, Term,
 };
+use std::path::{Path, PathBuf};
 
 /// One tool invocation.
 pub struct ToolCall<'a> {
@@ -594,6 +595,32 @@ fn normalise_path(path: &str) -> String {
 /// Longest `root_path` wins, so a project nested inside another checkout
 /// resolves to the inner one rather than whichever happened to be listed first.
 pub(crate) fn project_for_directory(store: &Store, dir: &str) -> Option<EntityId> {
+    project_containing(store, dir).or_else(|| worktree_for_directory(store, dir).map(|(id, _)| id))
+}
+
+/// The project a directory belongs to *through a linked worktree*, and that
+/// worktree's root — `None` when a plain match applies or no worktree does.
+///
+/// A linked git worktree outside the checkout (`git worktree add
+/// ../elsewhere`) is the same project in a directory no root_path names, so
+/// it resolved to nothing and its sessions started with no digest
+/// (KEEL-401). Only asked after a plain match fails, so the filesystem is
+/// never consulted for a directory that already matched, and a pointer that
+/// cannot be read leaves the answer what it was before.
+///
+/// The worktree root comes back too because it is a different checkout: its
+/// own branch and its own commits. The digest's git reconciliation has to run
+/// there, not in the main checkout the project is recorded at.
+pub(crate) fn worktree_for_directory(store: &Store, dir: &str) -> Option<(EntityId, PathBuf)> {
+    if project_containing(store, dir).is_some() {
+        return None;
+    }
+    let found = main_checkout_of(Path::new(dir))?;
+    project_containing(store, &found.main).map(|id| (id, found.root))
+}
+
+/// The deepest project whose `root_path` contains `dir`, by path alone.
+fn project_containing(store: &Store, dir: &str) -> Option<EntityId> {
     let dir = normalise_path(dir);
     let dir = dir.as_str();
     let page = store
@@ -619,6 +646,105 @@ pub(crate) fn project_for_directory(store: &Store, dir: &str) -> Option<EntityId
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// How far up from a directory to look for the `.git` that owns it.
+const MAX_GIT_ANCESTORS: usize = 64;
+
+/// A linked worktree, as found from a directory inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkedWorktree {
+    /// The main checkout it belongs to, as a path string for matching.
+    main: String,
+    /// The worktree's own root: the directory holding its `.git` file.
+    root: PathBuf,
+}
+
+/// The main checkout a linked git worktree belongs to, if `dir` is inside one.
+///
+/// A linked worktree's `.git` is a file, not a directory, reading
+/// `gitdir: <main>/.git/worktrees/<name>`. That pointer is all this follows:
+/// no `git` process, one small file read per ancestor at most. Anything that
+/// is not that shape — a plain checkout, a submodule (`.git/modules/…`), a
+/// bare repository, `--separate-git-dir` (whose common directory is not named
+/// `.git`), a file it cannot read — is `None`, which leaves the caller where
+/// it was. Reading the per-worktree `commondir` file would not help the last
+/// case: it names the shared git directory, not the main working tree.
+///
+/// A worktree placed inside another project's root matches that project
+/// first and never reaches this; that is the ordinary deepest-root rule.
+fn main_checkout_of(dir: &Path) -> Option<LinkedWorktree> {
+    let mut here = Some(dir);
+    for _ in 0..MAX_GIT_ANCESTORS {
+        let current = here?;
+        let dotgit = current.join(".git");
+        match std::fs::metadata(&dotgit) {
+            // The directory that owns this checkout is a main one: nothing to map.
+            Ok(m) if m.is_dir() => return None,
+            Ok(m) if m.is_file() => {
+                return main_checkout_from_pointer(current, &dotgit).map(|main| LinkedWorktree {
+                    main,
+                    root: current.to_owned(),
+                });
+            }
+            _ => here = current.parent(),
+        }
+    }
+    None
+}
+
+/// Follow one worktree's `.git` file back to its main checkout.
+fn main_checkout_from_pointer(worktree: &Path, dotgit: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(dotgit)
+        .ok()?
+        .take(4096)
+        .read_to_string(&mut text)
+        .ok()?;
+    let pointer = text
+        .lines()
+        .find_map(|l| l.strip_prefix("gitdir:"))
+        .map(str::trim)
+        .filter(|p| !p.is_empty())?;
+    // Relative to the worktree, as git reads it (`--relative-paths`, git 2.48+);
+    // an absolute pointer replaces the base. Collapsed as text, because the
+    // result is prefix-matched against a stored root_path and `a/b/../c` would
+    // never match `a/c`.
+    let gitdir = lexically_clean(&worktree.join(pointer));
+    let worktrees = gitdir.parent()?;
+    if worktrees.file_name()? != "worktrees" {
+        return None;
+    }
+    let common = worktrees.parent()?;
+    if common.file_name()? != ".git" {
+        return None;
+    }
+    Some(common.parent()?.to_string_lossy().into_owned())
+}
+
+/// Collapse `.` and `..` in a path by its text alone, without touching the
+/// filesystem, so symlinks are left exactly as spelled.
+fn lexically_clean(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => match out.components().next_back() {
+                // Step back over a real directory name.
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                // `..` at the root is the root, as the filesystem has it.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                // A relative path with nothing left to step over keeps it.
+                _ => out.push(".."),
+            },
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 /// Bring a caller's revision number into range without wrapping.
@@ -2678,7 +2804,165 @@ mod tests {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod path_tests {
-    use super::normalise_path;
+    use super::{
+        lexically_clean, main_checkout_of, normalise_path, project_for_directory,
+        worktree_for_directory,
+    };
+    use specline_core::{Actor, EntityStore, Project, Provenance, Store};
+    use std::path::Path;
+
+    /// A temporary directory whose own `.git` stops the upward walk, so a
+    /// `TMPDIR` that happens to sit inside a real worktree (agent isolation,
+    /// some CI runners) cannot leak into a test's answer.
+    fn guarded_tempdir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        dir
+    }
+
+    /// A store with one project rooted at `root`.
+    fn store_rooted_at(dir: &Path, root: &Path) -> (Store, specline_core::EntityId) {
+        let mut store = Store::open(dir.join("specline.sqlite")).unwrap();
+        let mut project = Project::new("harbour", "Harbour");
+        project.root_path = Some(root.display().to_string());
+        let id = project.id.clone();
+        store
+            .create(project.into(), &Provenance::anonymous(Actor::Claude))
+            .unwrap();
+        (store, id)
+    }
+
+    /// A main checkout, and a linked worktree of it somewhere else entirely.
+    fn main_and_worktree(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let main = dir.join("main");
+        let worktree = dir.join("elsewhere/wt");
+        std::fs::create_dir_all(main.join(".git/worktrees/wt")).unwrap();
+        std::fs::create_dir_all(worktree.join("src/deep")).unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", main.join(".git/worktrees/wt").display()),
+        )
+        .unwrap();
+        (main, worktree)
+    }
+
+    #[test]
+    fn a_linked_worktree_leads_back_to_its_main_checkout() {
+        let dir = guarded_tempdir();
+        let (main, worktree) = main_and_worktree(dir.path());
+        let found = main_checkout_of(&worktree).unwrap();
+        assert_eq!(found.main, main.to_str().unwrap());
+        assert_eq!(found.root, worktree);
+        let deep = main_checkout_of(&worktree.join("src/deep")).unwrap();
+        assert_eq!(deep.main, main.to_str().unwrap(), "from a subdirectory too");
+        assert_eq!(
+            deep.root, worktree,
+            "and the root is the worktree's, not the subdirectory"
+        );
+    }
+
+    /// `git worktree add --relative-paths` (git 2.48+). The mapped path must
+    /// match the stored root as text — canonicalising both sides in the test,
+    /// as the first version did, hid that `a/../b` never matched `b`.
+    #[test]
+    fn a_relative_pointer_resolves_to_the_project_end_to_end() {
+        let dir = guarded_tempdir();
+        let (main, worktree) = main_and_worktree(dir.path());
+        std::fs::write(
+            worktree.join(".git"),
+            "gitdir: ../../main/.git/worktrees/wt\n",
+        )
+        .unwrap();
+        assert_eq!(
+            main_checkout_of(&worktree).unwrap().main,
+            main.to_str().unwrap(),
+            "collapsed by text, not left as …/wt/../../main"
+        );
+        let (store, id) = store_rooted_at(dir.path(), &main);
+        assert_eq!(
+            project_for_directory(&store, worktree.to_str().unwrap()),
+            Some(id)
+        );
+    }
+
+    #[test]
+    fn dot_and_dot_dot_collapse_by_text() {
+        assert_eq!(
+            lexically_clean(Path::new("/a/b/../c/./d")),
+            Path::new("/a/c/d")
+        );
+        assert_eq!(lexically_clean(Path::new("/a/../../b")), Path::new("/b"));
+    }
+
+    #[test]
+    fn a_main_checkout_a_submodule_and_no_repository_map_to_nothing() {
+        let dir = guarded_tempdir();
+        let (main, _) = main_and_worktree(dir.path());
+        assert!(
+            main_checkout_of(&main).is_none(),
+            "a main checkout is itself"
+        );
+
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join(".git"),
+            format!("gitdir: {}\n", main.join(".git/modules/sub").display()),
+        )
+        .unwrap();
+        assert!(
+            main_checkout_of(&sub).is_none(),
+            "a submodule is not a worktree"
+        );
+
+        let plain = dir.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(main_checkout_of(&plain).is_none());
+        assert!(main_checkout_of(Path::new("/does/not/exist/anywhere")).is_none());
+    }
+
+    /// KEEL-401, end to end: the worktree resolves to the project whose root
+    /// is the main checkout, and an unrelated directory still resolves to none.
+    #[test]
+    fn a_worktree_outside_the_checkout_resolves_to_the_project() {
+        let dir = guarded_tempdir();
+        let (main, worktree) = main_and_worktree(dir.path());
+        let (store, id) = store_rooted_at(dir.path(), &main);
+
+        assert_eq!(
+            project_for_directory(&store, worktree.join("src").to_str().unwrap()),
+            Some(id.clone())
+        );
+        assert_eq!(
+            project_for_directory(&store, main.to_str().unwrap()),
+            Some(id.clone()),
+            "the main checkout still matches directly"
+        );
+        let unrelated = dir.path().join("unrelated");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        assert_eq!(
+            project_for_directory(&store, unrelated.to_str().unwrap()),
+            None
+        );
+    }
+
+    /// The digest's git reconciliation must read the worktree's own branch.
+    #[test]
+    fn a_worktree_match_carries_the_worktree_root_and_a_plain_match_does_not() {
+        let dir = guarded_tempdir();
+        let (main, worktree) = main_and_worktree(dir.path());
+        let (store, id) = store_rooted_at(dir.path(), &main);
+
+        assert_eq!(
+            worktree_for_directory(&store, worktree.join("src").to_str().unwrap()),
+            Some((id, worktree.clone()))
+        );
+        assert_eq!(
+            worktree_for_directory(&store, main.to_str().unwrap()),
+            None,
+            "a plain match is not a worktree match"
+        );
+    }
 
     #[test]
     fn redundant_separators_do_not_make_two_paths_different() {
