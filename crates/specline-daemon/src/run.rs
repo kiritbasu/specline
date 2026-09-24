@@ -228,6 +228,12 @@ pub async fn run() -> Result<()> {
     tracing::info!("  MCP endpoint  http://{bound}/mcp");
     tracing::info!("  local API     http://{bound}/api");
 
+    // Watch from outside the runtime, so a daemon that stops answering exits
+    // and is restarted instead of sitting on its port (KEEL-403).
+    if let Err(e) = crate::watchdog::spawn(bound, state.clone()) {
+        tracing::warn!(error = %e, "could not start the watchdog; a stalled daemon will not restart itself");
+    }
+
     // Tell the tool layer where the interface it is describing actually is, so
     // a result can carry a link into it (KEEL-226). After the bind, because the
     // port may have been 0 — and a link to the port somebody asked for rather
@@ -578,6 +584,8 @@ async fn shutdown() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+    // Before anything else: from here the probe is meant to fail.
+    crate::watchdog::stand_down();
     tracing::info!("shutting down; the write handle is released cleanly");
 }
 

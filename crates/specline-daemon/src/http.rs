@@ -463,70 +463,21 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
         "server/discover" => Ok(specline_mcp::discover_result()),
         "tools/list" => Ok(specline_mcp::list_result()),
         "tools/call" => {
-            let Some(name) = request.tool_name() else {
-                return rpc(
-                    id,
-                    Err(RpcError::new(
-                        codes::INVALID_PARAMS,
-                        "`params.name` is required for tools/call",
-                    )),
-                    era,
-                );
-            };
-            // Embedding the query is model inference — the one expensive thing
-            // on a read path, and the last thing that should happen while every
-            // other request waits on the store. Done here, before the lock, so
-            // the critical section is two SQL queries.
-            let query_vector = state.embed_query(name, request.arguments());
-            // The project's git log is the other thing a read path does that
-            // is not SQL. Two row reads under the lock to learn where and
-            // since when, then the process itself with the lock released — a
-            // checkout on a slow mount costs this request, not every request.
-            let repository = (name == "specline_context").then(|| {
-                let store = state.store();
-                let plan = specline_mcp::git::Plan::for_context(&store, request.arguments());
-                drop(store);
-                plan.read()
-            });
-
-            let mut store = state.store();
-            let before = latest_event(&store);
-            let outcome = specline_mcp::dispatch_prepared(
-                &mut store,
-                specline_mcp::ToolCall {
-                    name,
-                    arguments: request.arguments(),
-                    client: caller.as_ref(),
-                },
-                specline_mcp::Prepared {
-                    query_vector,
-                    repository,
-                },
-            );
-            // Announce after the lock is released, so a slow subscriber can
-            // never hold the write handle.
-            let after = latest_event(&store);
-            drop(store);
-            if let (Some(after_id), true) = (after.clone(), before != after) {
-                state.announce(after_id, format!("{name} completed"));
-            } else if name == "specline_note"
-                && let Ok(value) = &outcome
-                && !value
-                    .get("isError")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
+            let (state, request, caller) = (state.clone(), request.clone(), caller.clone());
+            match tokio::task::spawn_blocking(move || call_tool(&state, &request, caller.as_ref()))
+                .await
             {
-                // A note writes no event row, so the check above cannot see it
-                // and an open app kept showing a stale note stream with nothing
-                // to say it was stale (TQ-29). Announced under its own kind so
-                // a client can tell the two apart.
-                let entity_id = value
-                    .pointer("/structuredContent/note/entity_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                state.announce_note(entity_id, "specline_note completed");
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    tracing::error!(error = %e, "a tools/call failed on the blocking pool");
+                    Err(RpcError::new(
+                        codes::INTERNAL_ERROR,
+                        "the tool call failed inside the daemon before it could answer; \
+                         the daemon's log has the reason. Nothing is known to have been \
+                         written, so check with a read before retrying a write.",
+                    ))
+                }
             }
-            outcome
         }
         other => Err(RpcError::new(
             codes::METHOD_NOT_FOUND,
@@ -538,6 +489,82 @@ async fn mcp_endpoint(State(state): State<AppState>, headers: HeaderMap, body: S
     };
 
     rpc(id, result, era)
+}
+
+/// One `tools/call`, start to finish. Synchronous, and run on the blocking pool.
+///
+/// Everything in here blocks: the embedding model, a `git` child, the store's
+/// mutex, SQLite. On a tokio worker that blocking was not this request's cost
+/// alone. The worker that happened to own the I/O driver would run the handler
+/// itself, and stable tokio hands the driver to nobody else meanwhile, so one
+/// stalled call stopped the daemon accepting connections, firing timers and
+/// hearing SIGTERM — alive to launchd and answering no one (KEEL-403). On the
+/// blocking pool it costs one thread and this request.
+fn call_tool(
+    state: &AppState,
+    request: &Request,
+    caller: Option<&specline_core::Client>,
+) -> Result<Value, RpcError> {
+    let Some(name) = request.tool_name() else {
+        return Err(RpcError::new(
+            codes::INVALID_PARAMS,
+            "`params.name` is required for tools/call",
+        ));
+    };
+    // Embedding the query is model inference — the one expensive thing
+    // on a read path, and the last thing that should happen while every
+    // other request waits on the store. Done here, before the lock, so
+    // the critical section is two SQL queries.
+    let query_vector = state.embed_query(name, request.arguments());
+    // The project's git log is the other thing a read path does that
+    // is not SQL. Two row reads under the lock to learn where and
+    // since when, then the process itself with the lock released — a
+    // checkout on a slow mount costs this request, not every request.
+    let repository = (name == "specline_context").then(|| {
+        let store = state.store();
+        let plan = specline_mcp::git::Plan::for_context(&store, request.arguments());
+        drop(store);
+        plan.read()
+    });
+
+    let mut store = state.store();
+    let before = latest_event(&store);
+    let outcome = specline_mcp::dispatch_prepared(
+        &mut store,
+        specline_mcp::ToolCall {
+            name,
+            arguments: request.arguments(),
+            client: caller,
+        },
+        specline_mcp::Prepared {
+            query_vector,
+            repository,
+        },
+    );
+    // Announce after the lock is released, so a slow subscriber can
+    // never hold the write handle.
+    let after = latest_event(&store);
+    drop(store);
+    if let (Some(after_id), true) = (after.clone(), before != after) {
+        state.announce(after_id, format!("{name} completed"));
+    } else if name == "specline_note"
+        && let Ok(value) = &outcome
+        && !value
+            .get("isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        // A note writes no event row, so the check above cannot see it
+        // and an open app kept showing a stale note stream with nothing
+        // to say it was stale (TQ-29). Announced under its own kind so
+        // a client can tell the two apart.
+        let entity_id = value
+            .pointer("/structuredContent/note/entity_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        state.announce_note(entity_id, "specline_note completed");
+    }
+    outcome
 }
 
 /// The newest event id, used to detect that a call changed something.
@@ -934,71 +961,75 @@ fn person_at_the_interface() -> specline_core::Provenance {
 
 /// Create a task.
 async fn api_create_task(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
-    use specline_core::{Entity, EntityStore, Task};
+    off_runtime(move || {
+        use specline_core::{Entity, EntityStore, Task};
 
-    let Some(project) = body.get("project").and_then(Value::as_str) else {
-        return bad_request("`project` is required — the project id, slug or name");
-    };
-    let title = body
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let summary = body
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if title.trim().is_empty() {
-        return bad_request("`title` is required");
-    }
-
-    let mut store = state.store();
-    let project_id = match specline_mcp::resolve_project(&store, project) {
-        Ok(id) => id,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, e.code, e.message),
-    };
-
-    let mut task = Task::new(project_id, title.trim(), summary.trim());
-    if let Some(priority) = body.get("priority").and_then(Value::as_str) {
-        match specline_core::TaskPriority::parse(priority) {
-            Ok(p) => task.priority = p,
-            Err(e) => return bad_request(&e.to_string()),
+        let Some(project) = body.get("project").and_then(Value::as_str) else {
+            return bad_request("`project` is required — the project id, slug or name");
+        };
+        let title = body
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let summary = body
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if title.trim().is_empty() {
+            return bad_request("`title` is required");
         }
-    }
-    if let Some(kind) = body.get("kind").and_then(Value::as_str) {
-        match specline_core::TaskKind::parse(kind) {
-            Ok(k) => task.kind = k,
-            Err(e) => return bad_request(&e.to_string()),
-        }
-    }
-    // The phase, when one was chosen. A row with no milestone is invisible in
-    // every phase-scoped view, which is where somebody watching a project
-    // actually looks — so this being settable at creation is the difference
-    // between a task existing and a task being seen.
-    if let Some(milestone) = body.get("milestone").and_then(Value::as_str)
-        && !milestone.is_empty()
-    {
-        match specline_core::EntityId::parse_as(milestone, specline_core::EntityType::Milestone) {
-            Ok(id) => task.milestone_id = Some(id),
-            Err(e) => return bad_request(&format!("`milestone`: {e}")),
-        }
-    }
-    if let Some(labels) = body.get("labels").and_then(Value::as_array) {
-        task.labels = labels
-            .iter()
-            .filter_map(Value::as_str)
-            .map(|l| l.trim().to_owned())
-            .filter(|l| !l.is_empty())
-            .collect();
-    }
 
-    match store.create(Entity::Task(task), &person_at_the_interface()) {
-        Ok(created) => Json(json!({
-            "data": specline_mcp::entity_json(&created.entity),
-            "created": created.created,
-        }))
-        .into_response(),
-        Err(e) => internal_error(&format!("the task was not created: {e}")),
-    }
+        let mut store = state.store();
+        let project_id = match specline_mcp::resolve_project(&store, project) {
+            Ok(id) => id,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, e.code, e.message),
+        };
+
+        let mut task = Task::new(project_id, title.trim(), summary.trim());
+        if let Some(priority) = body.get("priority").and_then(Value::as_str) {
+            match specline_core::TaskPriority::parse(priority) {
+                Ok(p) => task.priority = p,
+                Err(e) => return bad_request(&e.to_string()),
+            }
+        }
+        if let Some(kind) = body.get("kind").and_then(Value::as_str) {
+            match specline_core::TaskKind::parse(kind) {
+                Ok(k) => task.kind = k,
+                Err(e) => return bad_request(&e.to_string()),
+            }
+        }
+        // The phase, when one was chosen. A row with no milestone is invisible in
+        // every phase-scoped view, which is where somebody watching a project
+        // actually looks — so this being settable at creation is the difference
+        // between a task existing and a task being seen.
+        if let Some(milestone) = body.get("milestone").and_then(Value::as_str)
+            && !milestone.is_empty()
+        {
+            match specline_core::EntityId::parse_as(milestone, specline_core::EntityType::Milestone)
+            {
+                Ok(id) => task.milestone_id = Some(id),
+                Err(e) => return bad_request(&format!("`milestone`: {e}")),
+            }
+        }
+        if let Some(labels) = body.get("labels").and_then(Value::as_array) {
+            task.labels = labels
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|l| l.trim().to_owned())
+                .filter(|l| !l.is_empty())
+                .collect();
+        }
+
+        match store.create(Entity::Task(task), &person_at_the_interface()) {
+            Ok(created) => Json(json!({
+                "data": specline_mcp::entity_json(&created.entity),
+                "created": created.created,
+            }))
+            .into_response(),
+            Err(e) => internal_error(&format!("the task was not created: {e}")),
+        }
+    })
+    .await
 }
 
 /// File a signal into the Inbox.
@@ -1013,78 +1044,81 @@ async fn api_create_task(State(state): State<AppState>, Json(body): Json<Value>)
 /// No `body`. See the route table for why — the constraint's own test is that
 /// an endpoint accepting a document revision is on the wrong side of the line.
 async fn api_create_signal(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
-    use specline_core::{Entity, EntityStore, Feedback};
+    off_runtime(move || {
+        use specline_core::{Entity, EntityStore, Feedback};
 
-    if !state.surfaces.inbox {
-        return inbox_is_off();
-    }
+        if !state.surfaces.inbox {
+            return inbox_is_off();
+        }
 
-    let Some(project) = body.get("project").and_then(Value::as_str) else {
-        return bad_request("`project` is required — the project id, slug or name");
-    };
-    // `summary`, not `title`, and the refusal has to say so: feedback has no
-    // title column, on the grounds that what somebody said has no name and
-    // inventing one is a small lie about the record.
-    let summary = body
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim();
-    if summary.is_empty() {
-        return bad_request("`summary` is required — what was said, in their words");
-    }
-    if body.get("body").is_some() {
-        return bad_request(
-            "`body` is not accepted here. The interface captures what was said; a longer \
+        let Some(project) = body.get("project").and_then(Value::as_str) else {
+            return bad_request("`project` is required — the project id, slug or name");
+        };
+        // `summary`, not `title`, and the refusal has to say so: feedback has no
+        // title column, on the grounds that what somebody said has no name and
+        // inventing one is a small lie about the record.
+        let summary = body
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if summary.is_empty() {
+            return bad_request("`summary` is required — what was said, in their words");
+        }
+        if body.get("body").is_some() {
+            return bad_request(
+                "`body` is not accepted here. The interface captures what was said; a longer \
              verbatim is written from the session it came from, which is where the conversation \
              is. Hard constraint 7.",
-        );
-    }
-
-    let mut store = state.store();
-    let project_id = match specline_mcp::resolve_project(&store, project) {
-        Ok(id) => id,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, e.code, e.message),
-    };
-
-    let mut signal = Feedback::new(project_id, summary);
-    // `idea`, not the table's own default of `observation`. The two are a real
-    // distinction — an observation is something noticed rather than told — and
-    // what arrives through the Inbox is almost always told or thought, whether
-    // it is KB's own or somebody else's. The CLI's `--kind` defaults the same
-    // way, so a signal filed from a terminal and one filed from the app are
-    // the same row.
-    signal.kind = specline_core::FeedbackKind::Idea;
-    if let Some(kind) = body.get("kind").and_then(Value::as_str) {
-        match specline_core::FeedbackKind::parse(kind) {
-            Ok(k) => signal.kind = k,
-            Err(e) => return bad_request(&e.to_string()),
+            );
         }
-    }
-    // Trimmed and emptied to `None`, so a field somebody tabbed through
-    // becomes an absent source rather than an empty string that renders as a
-    // blank attribution — which reads as "somebody said this" and is worse
-    // than saying nothing.
-    for (field, slot) in [
-        ("source", &mut signal.source),
-        ("contact", &mut signal.contact),
-    ] {
-        if let Some(value) = body.get(field).and_then(Value::as_str) {
-            let value = value.trim();
-            if !value.is_empty() {
-                *slot = Some(value.to_owned());
+
+        let mut store = state.store();
+        let project_id = match specline_mcp::resolve_project(&store, project) {
+            Ok(id) => id,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, e.code, e.message),
+        };
+
+        let mut signal = Feedback::new(project_id, summary);
+        // `idea`, not the table's own default of `observation`. The two are a real
+        // distinction — an observation is something noticed rather than told — and
+        // what arrives through the Inbox is almost always told or thought, whether
+        // it is KB's own or somebody else's. The CLI's `--kind` defaults the same
+        // way, so a signal filed from a terminal and one filed from the app are
+        // the same row.
+        signal.kind = specline_core::FeedbackKind::Idea;
+        if let Some(kind) = body.get("kind").and_then(Value::as_str) {
+            match specline_core::FeedbackKind::parse(kind) {
+                Ok(k) => signal.kind = k,
+                Err(e) => return bad_request(&e.to_string()),
             }
         }
-    }
+        // Trimmed and emptied to `None`, so a field somebody tabbed through
+        // becomes an absent source rather than an empty string that renders as a
+        // blank attribution — which reads as "somebody said this" and is worse
+        // than saying nothing.
+        for (field, slot) in [
+            ("source", &mut signal.source),
+            ("contact", &mut signal.contact),
+        ] {
+            if let Some(value) = body.get(field).and_then(Value::as_str) {
+                let value = value.trim();
+                if !value.is_empty() {
+                    *slot = Some(value.to_owned());
+                }
+            }
+        }
 
-    match store.create(Entity::Feedback(signal), &person_at_the_interface()) {
-        Ok(created) => Json(json!({
-            "data": specline_mcp::entity_json(&created.entity),
-            "created": created.created,
-        }))
-        .into_response(),
-        Err(e) => internal_error(&format!("the signal was not filed: {e}")),
-    }
+        match store.create(Entity::Feedback(signal), &person_at_the_interface()) {
+            Ok(created) => Json(json!({
+                "data": specline_mcp::entity_json(&created.entity),
+                "created": created.created,
+            }))
+            .into_response(),
+            Err(e) => internal_error(&format!("the signal was not filed: {e}")),
+        }
+    })
+    .await
 }
 
 /// Add a note to a row — the comment KB asked for.
@@ -1093,24 +1127,27 @@ async fn api_add_note(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    use specline_core::{EntityId, EntityStore, NewNote};
+    off_runtime(move || {
+        use specline_core::{EntityId, EntityStore, NewNote};
 
-    let text = body.get("body").and_then(Value::as_str).unwrap_or_default();
-    if text.trim().is_empty() {
-        return bad_request("`body` is required — a note with nothing in it says nothing");
-    }
+        let text = body.get("body").and_then(Value::as_str).unwrap_or_default();
+        if text.trim().is_empty() {
+            return bad_request("`body` is required — a note with nothing in it says nothing");
+        }
 
-    let entity_id = match EntityId::parse(&id) {
-        Ok(id) => id,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    };
+        let entity_id = match EntityId::parse(&id) {
+            Ok(id) => id,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+        };
 
-    let mut store = state.store();
-    let note = NewNote::new(entity_id, text.trim(), specline_core::Actor::Human);
-    match store.add_note(note, &person_at_the_interface()) {
-        Ok(note) => Json(json!({ "data": note })).into_response(),
-        Err(e) => internal_error(&format!("the note was not added: {e}")),
-    }
+        let mut store = state.store();
+        let note = NewNote::new(entity_id, text.trim(), specline_core::Actor::Human);
+        match store.add_note(note, &person_at_the_interface()) {
+            Ok(note) => Json(json!({ "data": note })).into_response(),
+            Err(e) => internal_error(&format!("the note was not added: {e}")),
+        }
+    })
+    .await
 }
 
 /// Archive a row.
@@ -1120,34 +1157,39 @@ async fn api_add_note(
 /// the row stays readable and stays in the history, and an endpoint called
 /// `delete` would be the first step towards somebody making that true.
 async fn api_archive(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    use specline_core::{EntityId, EntityStore};
+    off_runtime(move || {
+        use specline_core::{EntityId, EntityStore};
 
-    let entity_id = match EntityId::parse(&id) {
-        Ok(id) => id,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    };
+        let entity_id = match EntityId::parse(&id) {
+            Ok(id) => id,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+        };
 
-    let mut store = state.store();
-    // Archive whatever version is current rather than one the page was holding.
-    // A stale version here would mean "somebody edited the title while you were
-    // deciding", which is not a reason to refuse an archive — and the interface
-    // has no way to resolve that conflict anyway.
-    let current = match store.get(&entity_id) {
-        Ok(Some(entity)) => entity.audit().version,
-        Ok(None) => {
-            return api_error(
-                StatusCode::NOT_FOUND,
-                codes::INVALID_PARAMS,
-                format!("no artifact with id {id}"),
-            );
+        let mut store = state.store();
+        // Archive whatever version is current rather than one the page was holding.
+        // A stale version here would mean "somebody edited the title while you were
+        // deciding", which is not a reason to refuse an archive — and the interface
+        // has no way to resolve that conflict anyway.
+        let current = match store.get(&entity_id) {
+            Ok(Some(entity)) => entity.audit().version,
+            Ok(None) => {
+                return api_error(
+                    StatusCode::NOT_FOUND,
+                    codes::INVALID_PARAMS,
+                    format!("no artifact with id {id}"),
+                );
+            }
+            Err(e) => return internal_error(&format!("could not read {id}: {e}")),
+        };
+
+        match store.archive(&entity_id, current, &person_at_the_interface()) {
+            Ok(entity) => {
+                Json(json!({ "data": specline_mcp::entity_json(&entity) })).into_response()
+            }
+            Err(e) => internal_error(&format!("it was not archived: {e}")),
         }
-        Err(e) => return internal_error(&format!("could not read {id}: {e}")),
-    };
-
-    match store.archive(&entity_id, current, &person_at_the_interface()) {
-        Ok(entity) => Json(json!({ "data": specline_mcp::entity_json(&entity) })).into_response(),
-        Err(e) => internal_error(&format!("it was not archived: {e}")),
-    }
+    })
+    .await
 }
 
 /// Close a task, with the reason, the message and the evidence the storage
@@ -1161,61 +1203,64 @@ async fn api_close_task(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    use specline_core::{Close, CloseReason, EntityId, work};
+    off_runtime(move || {
+        use specline_core::{Close, CloseReason, EntityId, work};
 
-    let entity_id = match EntityId::parse(&id) {
-        Ok(id) => id,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    };
-
-    let reason = match CloseReason::parse(body.get("reason").and_then(Value::as_str).unwrap_or(""))
-    {
-        Ok(reason) => reason,
-        Err(e) => return bad_request(&e.to_string()),
-    };
-    let message = body
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_owned();
-    let evidence: Vec<String> = body
-        .get("evidence")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    let other = match body.get("other").and_then(Value::as_str) {
-        Some(raw) => match EntityId::parse(raw) {
-            Ok(id) => Some(id),
+        let entity_id = match EntityId::parse(&id) {
+            Ok(id) => id,
             Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-        },
-        None => None,
-    };
+        };
 
-    let mut store = state.store();
-    let close = Close {
-        reason,
-        message,
-        evidence,
-        other,
-    };
-    match work::close(&mut *store, &entity_id, &close, &person_at_the_interface()) {
-        Ok(closed) => Json(json!({
-            "data": specline_mcp::entity_json(&specline_core::Entity::Task(closed.task)),
-        }))
-        .into_response(),
-        // The storage layer's refusals are the interesting ones here — no
-        // reason, no message, no evidence — and they are written to be read by
-        // whoever has to fix the form, so they are passed through rather than
-        // flattened.
-        Err(e) => api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    }
+        let reason =
+            match CloseReason::parse(body.get("reason").and_then(Value::as_str).unwrap_or("")) {
+                Ok(reason) => reason,
+                Err(e) => return bad_request(&e.to_string()),
+            };
+        let message = body
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let evidence: Vec<String> = body
+            .get("evidence")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let other = match body.get("other").and_then(Value::as_str) {
+            Some(raw) => match EntityId::parse(raw) {
+                Ok(id) => Some(id),
+                Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+            },
+            None => None,
+        };
+
+        let mut store = state.store();
+        let close = Close {
+            reason,
+            message,
+            evidence,
+            other,
+        };
+        match work::close(&mut *store, &entity_id, &close, &person_at_the_interface()) {
+            Ok(closed) => Json(json!({
+                "data": specline_mcp::entity_json(&specline_core::Entity::Task(closed.task)),
+            }))
+            .into_response(),
+            // The storage layer's refusals are the interesting ones here — no
+            // reason, no message, no evidence — and they are written to be read by
+            // whoever has to fix the form, so they are passed through rather than
+            // flattened.
+            Err(e) => api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+        }
+    })
+    .await
 }
 
 /// Change the fields on a task that a person moves while looking at it.
@@ -1250,169 +1295,172 @@ async fn api_update_task(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    use specline_core::{EntityId, EntityStore, EntityType, TaskStatus};
+    off_runtime(move || {
+        use specline_core::{EntityId, EntityStore, EntityType, TaskStatus};
 
-    let entity_id = match EntityId::parse_as(&id, EntityType::Task) {
-        Ok(id) => id,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    };
-
-    let mut store = state.store();
-    let Some(specline_core::Entity::Task(current)) = (match store.get(&entity_id) {
-        Ok(found) => found,
-        Err(e) => return internal_error(&format!("could not read {id}: {e}")),
-    }) else {
-        return api_error(
-            StatusCode::NOT_FOUND,
-            codes::INVALID_PARAMS,
-            format!("no task with id {id}"),
-        );
-    };
-
-    // The version the page was holding. Unlike the archive endpoint, which
-    // takes whatever is current on the grounds that a title edit is no reason
-    // to refuse an archive, this one is editing the very fields a concurrent
-    // write would have touched — so a conflict is real and the caller is told.
-    let Some(expected) = body.get("version").and_then(Value::as_i64) else {
-        return bad_request(
-            "`version` is required — the version you read, so a concurrent edit is a conflict \
-             rather than a silent overwrite",
-        );
-    };
-    let Ok(expected) = i32::try_from(expected) else {
-        return bad_request("`version` is not a version any row has had");
-    };
-
-    // A field present but of the wrong shape is refused rather than skipped.
-    // `and_then(as_str)` on its own turns `{"status": 5}` into a silent no-op,
-    // and a caller told its write succeeded when one field of it vanished will
-    // build on that — which is the reasoning `store::patch` gives for rejecting
-    // rather than ignoring, applied one layer out.
-    macro_rules! string_field {
-        ($key:expr) => {
-            match body.get($key) {
-                None | Some(Value::Null) => None,
-                Some(Value::String(raw)) => Some(raw.as_str()),
-                Some(_) => return bad_request(concat!("`", $key, "` must be a string")),
-            }
+        let entity_id = match EntityId::parse_as(&id, EntityType::Task) {
+            Ok(id) => id,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
         };
-    }
 
-    let mut changes = serde_json::Map::new();
-
-    if let Some(raw) = string_field!("status") {
-        let status = match TaskStatus::parse(raw) {
-            Ok(status) => status,
-            Err(e) => return bad_request(&e.to_string()),
+        let mut store = state.store();
+        let Some(specline_core::Entity::Task(current)) = (match store.get(&entity_id) {
+            Ok(found) => found,
+            Err(e) => return internal_error(&format!("could not read {id}: {e}")),
+        }) else {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                codes::INVALID_PARAMS,
+                format!("no task with id {id}"),
+            );
         };
-        match status {
-            TaskStatus::Done | TaskStatus::WontDo => {
-                return bad_request(
-                    "a task cannot be closed here — closing owes a reason, a message and, for done, \
-                     evidence. Use /api/tasks/{id}/close, which asks for them.",
-                );
-            }
-            TaskStatus::InProgress => {
-                return bad_request(
-                    "starting a task is a claim, and a claim records which session is on it — \
-                     which is what makes the board answer 'who is doing this' rather than only \
-                     'something is'. Ask Claude to claim it, or use `specline claim`.",
-                );
-            }
-            TaskStatus::Todo | TaskStatus::Review => {
-                changes.insert("status".to_owned(), json!(status.as_str()));
-                if current.status == TaskStatus::InProgress {
-                    changes.insert("claimed_by".to_owned(), Value::Null);
-                    changes.insert("claimed_at".to_owned(), Value::Null);
+
+        // The version the page was holding. Unlike the archive endpoint, which
+        // takes whatever is current on the grounds that a title edit is no reason
+        // to refuse an archive, this one is editing the very fields a concurrent
+        // write would have touched — so a conflict is real and the caller is told.
+        let Some(expected) = body.get("version").and_then(Value::as_i64) else {
+            return bad_request(
+                "`version` is required — the version you read, so a concurrent edit is a conflict \
+                 rather than a silent overwrite",
+            );
+        };
+        let Ok(expected) = i32::try_from(expected) else {
+            return bad_request("`version` is not a version any row has had");
+        };
+
+        // A field present but of the wrong shape is refused rather than skipped.
+        // `and_then(as_str)` on its own turns `{"status": 5}` into a silent no-op,
+        // and a caller told its write succeeded when one field of it vanished will
+        // build on that — which is the reasoning `store::patch` gives for rejecting
+        // rather than ignoring, applied one layer out.
+        macro_rules! string_field {
+            ($key:expr) => {
+                match body.get($key) {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(raw)) => Some(raw.as_str()),
+                    Some(_) => return bad_request(concat!("`", $key, "` must be a string")),
                 }
-            }
-        }
-    }
-
-    if let Some(raw) = string_field!("priority") {
-        match specline_core::TaskPriority::parse(raw) {
-            Ok(priority) => changes.insert("priority".to_owned(), json!(priority.as_str())),
-            Err(e) => return bad_request(&e.to_string()),
-        };
-    }
-
-    if let Some(raw) = string_field!("kind") {
-        match specline_core::TaskKind::parse(raw) {
-            Ok(kind) => changes.insert("kind".to_owned(), json!(kind.as_str())),
-            Err(e) => return bad_request(&e.to_string()),
-        };
-    }
-
-    // An empty string is "no phase", which is what the select's `none` option
-    // sends. Distinct from the key being absent, which means "leave it alone" —
-    // and the difference matters, because clearing a milestone is a thing
-    // somebody means to do.
-    if let Some(raw) = string_field!("milestone") {
-        if raw.is_empty() {
-            changes.insert("milestone_id".to_owned(), Value::Null);
-        } else {
-            match EntityId::parse_as(raw, EntityType::Milestone) {
-                Ok(milestone) => {
-                    changes.insert("milestone_id".to_owned(), json!(milestone.to_string()))
-                }
-                Err(e) => return bad_request(&format!("`milestone`: {e}")),
             };
         }
-    }
 
-    // Taken as given, beyond trimming the blanks the create path also drops.
-    // The fold that stops `ui` and `UI` becoming two labels lives in the
-    // picker, deliberately (B-86); a second copy of it here would be a second
-    // rule to keep in step.
-    match body.get("labels") {
-        None | Some(Value::Null) => {}
-        Some(Value::Array(items)) => {
-            let mut labels = Vec::with_capacity(items.len());
-            for item in items {
-                let Some(label) = item.as_str() else {
-                    return bad_request("`labels` must be an array of strings");
-                };
-                let label = label.trim();
-                if !label.is_empty() {
-                    labels.push(label.to_owned());
+        let mut changes = serde_json::Map::new();
+
+        if let Some(raw) = string_field!("status") {
+            let status = match TaskStatus::parse(raw) {
+                Ok(status) => status,
+                Err(e) => return bad_request(&e.to_string()),
+            };
+            match status {
+                TaskStatus::Done | TaskStatus::WontDo => {
+                    return bad_request(
+                        "a task cannot be closed here — closing owes a reason, a message and, for done, \
+                         evidence. Use /api/tasks/{id}/close, which asks for them.",
+                    );
+                }
+                TaskStatus::InProgress => {
+                    return bad_request(
+                        "starting a task is a claim, and a claim records which session is on it — \
+                         which is what makes the board answer 'who is doing this' rather than only \
+                         'something is'. Ask Claude to claim it, or use `specline claim`.",
+                    );
+                }
+                TaskStatus::Todo | TaskStatus::Review => {
+                    changes.insert("status".to_owned(), json!(status.as_str()));
+                    if current.status == TaskStatus::InProgress {
+                        changes.insert("claimed_by".to_owned(), Value::Null);
+                        changes.insert("claimed_at".to_owned(), Value::Null);
+                    }
                 }
             }
-            changes.insert("labels".to_owned(), json!(labels));
         }
-        Some(_) => return bad_request("`labels` must be an array of strings"),
-    }
 
-    if changes.is_empty() {
-        return bad_request(
-            "nothing to change — send at least one of status, priority, kind, milestone or labels",
-        );
-    }
+        if let Some(raw) = string_field!("priority") {
+            match specline_core::TaskPriority::parse(raw) {
+                Ok(priority) => changes.insert("priority".to_owned(), json!(priority.as_str())),
+                Err(e) => return bad_request(&e.to_string()),
+            };
+        }
 
-    match store.update(&entity_id, expected, &changes, &person_at_the_interface()) {
-        Ok(entity) => Json(json!({ "data": specline_mcp::entity_json(&entity) })).into_response(),
-        // A stale version is the caller's to resolve, and it needs the current
-        // state to do it — the same 409 payload SPEC §7.3 gives an agent,
-        // minus the event history a form has no use for.
-        Err(specline_core::Error::StaleVersion { latest, .. }) => {
-            let current_state = store.get(&entity_id).ok().flatten();
-            (
-                StatusCode::CONFLICT,
-                Json(json!({
-                    "error": {
-                        "code": codes::CONFLICT,
-                        "message": "this task changed while you were editing it",
-                    },
-                    "latest_version": latest,
-                    "current_state": current_state.as_ref().map(specline_mcp::entity_json),
-                })),
-            )
-                .into_response()
+        if let Some(raw) = string_field!("kind") {
+            match specline_core::TaskKind::parse(raw) {
+                Ok(kind) => changes.insert("kind".to_owned(), json!(kind.as_str())),
+                Err(e) => return bad_request(&e.to_string()),
+            };
         }
-        Err(e) if e.is_caller_error() => {
-            api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e)
+
+        // An empty string is "no phase", which is what the select's `none` option
+        // sends. Distinct from the key being absent, which means "leave it alone" —
+        // and the difference matters, because clearing a milestone is a thing
+        // somebody means to do.
+        if let Some(raw) = string_field!("milestone") {
+            if raw.is_empty() {
+                changes.insert("milestone_id".to_owned(), Value::Null);
+            } else {
+                match EntityId::parse_as(raw, EntityType::Milestone) {
+                    Ok(milestone) => {
+                        changes.insert("milestone_id".to_owned(), json!(milestone.to_string()))
+                    }
+                    Err(e) => return bad_request(&format!("`milestone`: {e}")),
+                };
+            }
         }
-        Err(e) => internal_error(&format!("the task was not changed: {e}")),
-    }
+
+        // Taken as given, beyond trimming the blanks the create path also drops.
+        // The fold that stops `ui` and `UI` becoming two labels lives in the
+        // picker, deliberately (B-86); a second copy of it here would be a second
+        // rule to keep in step.
+        match body.get("labels") {
+            None | Some(Value::Null) => {}
+            Some(Value::Array(items)) => {
+                let mut labels = Vec::with_capacity(items.len());
+                for item in items {
+                    let Some(label) = item.as_str() else {
+                        return bad_request("`labels` must be an array of strings");
+                    };
+                    let label = label.trim();
+                    if !label.is_empty() {
+                        labels.push(label.to_owned());
+                    }
+                }
+                changes.insert("labels".to_owned(), json!(labels));
+            }
+            Some(_) => return bad_request("`labels` must be an array of strings"),
+        }
+
+        if changes.is_empty() {
+            return bad_request(
+                "nothing to change — send at least one of status, priority, kind, milestone or labels",
+            );
+        }
+
+        match store.update(&entity_id, expected, &changes, &person_at_the_interface()) {
+            Ok(entity) => Json(json!({ "data": specline_mcp::entity_json(&entity) })).into_response(),
+            // A stale version is the caller's to resolve, and it needs the current
+            // state to do it — the same 409 payload SPEC §7.3 gives an agent,
+            // minus the event history a form has no use for.
+            Err(specline_core::Error::StaleVersion { latest, .. }) => {
+                let current_state = store.get(&entity_id).ok().flatten();
+                (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "error": {
+                            "code": codes::CONFLICT,
+                            "message": "this task changed while you were editing it",
+                        },
+                        "latest_version": latest,
+                        "current_state": current_state.as_ref().map(specline_mcp::entity_json),
+                    })),
+                )
+                    .into_response()
+            }
+            Err(e) if e.is_caller_error() => {
+                api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e)
+            }
+            Err(e) => internal_error(&format!("the task was not changed: {e}")),
+        }
+    })
+    .await
 }
 
 /// Turn a tool call into an HTTP response, for the REST surface.
@@ -1423,81 +1471,84 @@ async fn api_update_task(
 /// so it wants the state the single writer has actually committed — and the
 /// daemon is the only thing that can answer for that.
 async fn api_generate(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
-    use specline_core::{Entity, EntityQuery, EntityStore, EntityType, Mode, generate};
+    off_runtime(move || {
+        use specline_core::{Entity, EntityQuery, EntityStore, EntityType, Mode, generate};
 
-    let reference = body
-        .get("project")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if reference.is_empty() {
-        return bad_request("`project` is required — pass a project id, slug or name");
-    }
-    let check = body.get("check").and_then(Value::as_bool).unwrap_or(false);
-
-    let store = state.store();
-
-    let projects = match store.list(&EntityQuery::default().of_type(EntityType::Project)) {
-        Ok(page) => page,
-        Err(e) => return internal_error(&format!("list projects: {e}")),
-    };
-    let needle = reference.to_lowercase();
-    let Some(Entity::Project(project)) = projects.items.into_iter().find(|p| match p {
-        Entity::Project(pr) => {
-            pr.id.as_str() == reference
-                || pr.slug.eq_ignore_ascii_case(&reference)
-                || pr.name.to_lowercase() == needle
+        let reference = body
+            .get("project")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        if reference.is_empty() {
+            return bad_request("`project` is required — pass a project id, slug or name");
         }
-        _ => false,
-    }) else {
-        return bad_request(&format!("no project matches `{reference}`"));
-    };
+        let check = body.get("check").and_then(Value::as_bool).unwrap_or(false);
 
-    let repo_root = match body.get("repo").and_then(Value::as_str) {
-        Some(path) => std::path::PathBuf::from(path),
-        None => match project.root_path.as_deref() {
-            Some(path) => std::path::PathBuf::from(path),
-            None => {
-                return bad_request(&format!(
-                    "{} has no root_path recorded, so there is nowhere to write. Pass `repo`, or \
-                     set root_path on the project",
-                    project.slug
-                ));
+        let store = state.store();
+
+        let projects = match store.list(&EntityQuery::default().of_type(EntityType::Project)) {
+            Ok(page) => page,
+            Err(e) => return internal_error(&format!("list projects: {e}")),
+        };
+        let needle = reference.to_lowercase();
+        let Some(Entity::Project(project)) = projects.items.into_iter().find(|p| match p {
+            Entity::Project(pr) => {
+                pr.id.as_str() == reference
+                    || pr.slug.eq_ignore_ascii_case(&reference)
+                    || pr.name.to_lowercase() == needle
             }
-        },
-    };
+            _ => false,
+        }) else {
+            return bad_request(&format!("no project matches `{reference}`"));
+        };
 
-    let mode = if check { Mode::Check } else { Mode::Write };
+        let repo_root = match body.get("repo").and_then(Value::as_str) {
+            Some(path) => std::path::PathBuf::from(path),
+            None => match project.root_path.as_deref() {
+                Some(path) => std::path::PathBuf::from(path),
+                None => {
+                    return bad_request(&format!(
+                        "{} has no root_path recorded, so there is nowhere to write. Pass `repo`, or \
+                         set root_path on the project",
+                        project.slug
+                    ));
+                }
+            },
+        };
 
-    // Decide with the store, write without it.
-    //
-    // This used to be one `generate::all` under the lock, and the lock covered
-    // several dozen small file writes as well as every read. A generate against
-    // this project's own store took long enough that the CLI's health probe
-    // timed out and concluded no daemon was there — so the daemon produced the
-    // second writer the probe exists to prevent.
-    let plan = match generate::plan(&store, &project.id, &repo_root) {
-        Ok(plan) => plan,
-        Err(e) => return internal_error(&format!("plan the generate for {}: {e}", project.slug)),
-    };
-    let slug = project.slug.clone();
-    drop(store);
+        let mode = if check { Mode::Check } else { Mode::Write };
 
-    match plan.apply(mode) {
-        Ok(report) => (
-            StatusCode::OK,
-            Json(json!({ "data": {
-                "written": report.written,
-                "unchanged": report.unchanged,
-                "unrepresented": report.unrepresented,
-                "orphans": report.orphans,
-                "legacy_mirror": report.legacy_mirror,
-                "checked": check,
-            }})),
-        )
-            .into_response(),
-        Err(e) => internal_error(&format!("generate {slug}: {e}")),
-    }
+        // Decide with the store, write without it.
+        //
+        // This used to be one `generate::all` under the lock, and the lock covered
+        // several dozen small file writes as well as every read. A generate against
+        // this project's own store took long enough that the CLI's health probe
+        // timed out and concluded no daemon was there — so the daemon produced the
+        // second writer the probe exists to prevent.
+        let plan = match generate::plan(&store, &project.id, &repo_root) {
+            Ok(plan) => plan,
+            Err(e) => return internal_error(&format!("plan the generate for {}: {e}", project.slug)),
+        };
+        let slug = project.slug.clone();
+        drop(store);
+
+        match plan.apply(mode) {
+            Ok(report) => (
+                StatusCode::OK,
+                Json(json!({ "data": {
+                    "written": report.written,
+                    "unchanged": report.unchanged,
+                    "unrepresented": report.unrepresented,
+                    "orphans": report.orphans,
+                    "legacy_mirror": report.legacy_mirror,
+                    "checked": check,
+                }})),
+            )
+                .into_response(),
+            Err(e) => internal_error(&format!("generate {slug}: {e}")),
+        }
+    })
+    .await
 }
 
 /// One error shape for the whole local API.
@@ -1519,6 +1570,26 @@ fn api_error(status: StatusCode, code: i32, message: impl std::fmt::Display) -> 
 
 fn bad_request(message: &str) -> Response {
     api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, message)
+}
+
+/// Run a handler's body on the blocking pool, off the async workers.
+///
+/// Every handler that takes the store does synchronous work: the store's std
+/// mutex, SQLite, a file read, a `git` child. On a tokio worker that work
+/// could freeze far more than its own request. The worker that owned the I/O
+/// driver runs the handler itself, and stable tokio hands the driver to nobody
+/// meanwhile, so one `open()` that stalled — a waking external drive — left the
+/// daemon accepting no connections, firing no timers and deaf to SIGTERM, while
+/// launchd saw a live process (KEEL-403). Here it costs one pool thread and
+/// the request that asked.
+async fn off_runtime(work: impl FnOnce() -> Response + Send + 'static) -> Response {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::error!(error = %e, "a request handler failed on the blocking pool");
+            internal_error("the request failed inside the daemon; its log has the reason")
+        }
+    }
 }
 
 fn internal_error(message: &str) -> Response {
@@ -1621,59 +1692,68 @@ async fn api_context(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let args = params_to_json("specline_context", params);
-    // Same two-step as the MCP path: git runs with the lock released.
-    let repository = {
-        let store = state.store();
-        let plan = specline_mcp::git::Plan::for_context(&store, &args);
-        drop(store);
-        plan.read()
-    };
-    let mut store = state.store();
-    as_api(specline_mcp::dispatch_prepared(
-        &mut store,
-        specline_mcp::ToolCall {
-            name: "specline_context",
-            arguments: &args,
-            client: None,
-        },
-        specline_mcp::Prepared {
-            query_vector: None,
-            repository: Some(repository),
-        },
-    ))
+    off_runtime(move || {
+        let args = params_to_json("specline_context", params);
+        // Same two-step as the MCP path: git runs with the lock released.
+        let repository = {
+            let store = state.store();
+            let plan = specline_mcp::git::Plan::for_context(&store, &args);
+            drop(store);
+            plan.read()
+        };
+        let mut store = state.store();
+        as_api(specline_mcp::dispatch_prepared(
+            &mut store,
+            specline_mcp::ToolCall {
+                name: "specline_context",
+                arguments: &args,
+                client: None,
+            },
+            specline_mcp::Prepared {
+                query_vector: None,
+                repository: Some(repository),
+            },
+        ))
+    })
+    .await
 }
 
 async fn api_projects(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let args = params_to_json("specline_projects", params);
-    let mut store = state.store();
-    as_api(specline_mcp::dispatch(
-        &mut store,
-        specline_mcp::ToolCall {
-            name: "specline_projects",
-            arguments: &args,
-            client: None,
-        },
-    ))
+    off_runtime(move || {
+        let args = params_to_json("specline_projects", params);
+        let mut store = state.store();
+        as_api(specline_mcp::dispatch(
+            &mut store,
+            specline_mcp::ToolCall {
+                name: "specline_projects",
+                arguments: &args,
+                client: None,
+            },
+        ))
+    })
+    .await
 }
 
 async fn api_search(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let args = params_to_json("specline_search", params);
-    let mut store = state.store();
-    as_api(specline_mcp::dispatch(
-        &mut store,
-        specline_mcp::ToolCall {
-            name: "specline_search",
-            arguments: &args,
-            client: None,
-        },
-    ))
+    off_runtime(move || {
+        let args = params_to_json("specline_search", params);
+        let mut store = state.store();
+        as_api(specline_mcp::dispatch(
+            &mut store,
+            specline_mcp::ToolCall {
+                name: "specline_search",
+                arguments: &args,
+                client: None,
+            },
+        ))
+    })
+    .await
 }
 
 /// What can be worked on right now.
@@ -1715,52 +1795,55 @@ async fn api_ready(
     State(state): State<AppState>,
     Query(mut params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    // Taken out before the arguments are built: `specline_next` has no `blocked`
-    // in its schema, and passing an undeclared parameter through to a tool is
-    // how a filter gets silently ignored.
-    let want_blocked = params.remove("blocked").is_some_and(|v| v == "true");
-    let project = params.get("project").cloned();
+    off_runtime(move || {
+        // Taken out before the arguments are built: `specline_next` has no `blocked`
+        // in its schema, and passing an undeclared parameter through to a tool is
+        // how a filter gets silently ignored.
+        let want_blocked = params.remove("blocked").is_some_and(|v| v == "true");
+        let project = params.get("project").cloned();
 
-    let args = params_to_json("specline_next", params);
-    let mut store = state.store();
-    let mut result = specline_mcp::dispatch(
-        &mut store,
-        specline_mcp::ToolCall {
-            name: "specline_next",
-            arguments: &args,
-            client: None,
-        },
-    );
+        let args = params_to_json("specline_next", params);
+        let mut store = state.store();
+        let mut result = specline_mcp::dispatch(
+            &mut store,
+            specline_mcp::ToolCall {
+                name: "specline_next",
+                arguments: &args,
+                client: None,
+            },
+        );
 
-    if want_blocked && let Ok(value) = &mut result {
-        let Some(slug) = project else {
-            return bad_request("`blocked=true` needs `project` — blocked is per project");
-        };
-        let project_id = match specline_mcp::dispatch::resolve_project(&store, &slug) {
-            Ok(id) => id,
-            Err(e) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
-            }
-        };
-        match specline_core::next::blocked_tasks(&*store, &project_id) {
-            Ok(ids) => {
-                // Sorted so two identical stores answer identically. The set is
-                // a `HashSet`, and an order that wobbles between calls would
-                // make a snapshot test flap for no reason.
-                let mut ids: Vec<String> = ids.iter().map(ToString::to_string).collect();
-                ids.sort();
-                if let Some(obj) = value
-                    .get_mut("structuredContent")
-                    .and_then(Value::as_object_mut)
-                {
-                    obj.insert("blocked".to_owned(), json!(ids));
+        if want_blocked && let Ok(value) = &mut result {
+            let Some(slug) = project else {
+                return bad_request("`blocked=true` needs `project` — blocked is per project");
+            };
+            let project_id = match specline_mcp::dispatch::resolve_project(&store, &slug) {
+                Ok(id) => id,
+                Err(e) => {
+                    return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
                 }
+            };
+            match specline_core::next::blocked_tasks(&*store, &project_id) {
+                Ok(ids) => {
+                    // Sorted so two identical stores answer identically. The set is
+                    // a `HashSet`, and an order that wobbles between calls would
+                    // make a snapshot test flap for no reason.
+                    let mut ids: Vec<String> = ids.iter().map(ToString::to_string).collect();
+                    ids.sort();
+                    if let Some(obj) = value
+                        .get_mut("structuredContent")
+                        .and_then(Value::as_object_mut)
+                    {
+                        obj.insert("blocked".to_owned(), json!(ids));
+                    }
+                }
+                Err(e) => return internal_error(&format!("list what is blocked in {slug}: {e}")),
             }
-            Err(e) => return internal_error(&format!("list what is blocked in {slug}: {e}")),
         }
-    }
 
-    as_api(result)
+        as_api(result)
+    })
+    .await
 }
 
 /// One row's whole history — every field change, with its before and after.
@@ -1779,37 +1862,40 @@ async fn api_entity_history(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use specline_core::EntityStore as _;
+    off_runtime(move || {
+        use specline_core::EntityStore as _;
 
-    let store = state.store();
-    let entity_id = match store.resolve_ref(&id) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            return api_error(
-                StatusCode::NOT_FOUND,
-                codes::INVALID_PARAMS,
-                format!("`{id}` names nothing in this store"),
-            );
+        let store = state.store();
+        let entity_id = match store.resolve_ref(&id) {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                return api_error(
+                    StatusCode::NOT_FOUND,
+                    codes::INVALID_PARAMS,
+                    format!("`{id}` names nothing in this store"),
+                );
+            }
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+        };
+        let limit = params
+            .get("limit")
+            .and_then(|l| l.parse::<usize>().ok())
+            .unwrap_or(500)
+            .clamp(1, 5_000);
+        match store.events_for(&entity_id, limit) {
+            Ok(page) => (
+                StatusCode::OK,
+                Json(json!({ "data": {
+                    "events": page.items,
+                    "total": page.total,
+                    "truncated": page.truncated,
+                }})),
+            )
+                .into_response(),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
         }
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    };
-    let limit = params
-        .get("limit")
-        .and_then(|l| l.parse::<usize>().ok())
-        .unwrap_or(500)
-        .clamp(1, 5_000);
-    match store.events_for(&entity_id, limit) {
-        Ok(page) => (
-            StatusCode::OK,
-            Json(json!({ "data": {
-                "events": page.items,
-                "total": page.total,
-                "truncated": page.truncated,
-            }})),
-        )
-            .into_response(),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+    })
+    .await
 }
 
 /// The bytes of a stored blob, with its own content type.
@@ -1818,57 +1904,60 @@ async fn api_entity_history(
 /// at, and making the app decode a megabyte of JSON to show a screenshot would
 /// be paying the tool-call tax twice for no reason.
 async fn api_blob(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let blob_id = match specline_core::BlobId::parse(&id) {
-        Ok(b) => b,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-    };
-    let store = state.store();
-    match store.get_blob(&blob_id) {
-        Ok(Some(blob)) => (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, blob.media_type.clone()),
-                // Content-addressed and never rewritten, so it can be cached
-                // hard. A blob id names one sequence of bytes forever.
-                (
-                    header::CACHE_CONTROL,
-                    "public, max-age=31536000, immutable".to_owned(),
-                ),
-                // A blob is bytes an agent put in the store, and the agent was
-                // reading prose it did not write. Two headers stand between
-                // that and script execution in whatever renders it.
-                //
-                // `nosniff` stops a browser deciding a blob declared
-                // `image/png` is really HTML because it starts with `<`.
-                // Without it the declared type is a suggestion.
-                //
-                // The CSP is the one that matters for SVG. An SVG is a document
-                // that may contain `<script>`, and it is served with an image
-                // media type — so a diagram written by a prompt-influenced
-                // agent is stored cross-site scripting the moment something
-                // renders it as a document rather than as an image.
-                // `sandbox` with no allowances denies scripts, forms, plugins
-                // and same-origin access to whatever a blob response is loaded
-                // into, whatever it turns out to contain.
-                (
-                    header::HeaderName::from_static("x-content-type-options"),
-                    "nosniff".to_owned(),
-                ),
-                (
-                    header::CONTENT_SECURITY_POLICY,
-                    "default-src 'none'; sandbox".to_owned(),
-                ),
-            ],
-            blob.bytes,
-        )
-            .into_response(),
-        Ok(None) => api_error(
-            StatusCode::NOT_FOUND,
-            codes::INVALID_PARAMS,
-            format!("no blob `{id}`"),
-        ),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+    off_runtime(move || {
+        let blob_id = match specline_core::BlobId::parse(&id) {
+            Ok(b) => b,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+        };
+        let store = state.store();
+        match store.get_blob(&blob_id) {
+            Ok(Some(blob)) => (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, blob.media_type.clone()),
+                    // Content-addressed and never rewritten, so it can be cached
+                    // hard. A blob id names one sequence of bytes forever.
+                    (
+                        header::CACHE_CONTROL,
+                        "public, max-age=31536000, immutable".to_owned(),
+                    ),
+                    // A blob is bytes an agent put in the store, and the agent was
+                    // reading prose it did not write. Two headers stand between
+                    // that and script execution in whatever renders it.
+                    //
+                    // `nosniff` stops a browser deciding a blob declared
+                    // `image/png` is really HTML because it starts with `<`.
+                    // Without it the declared type is a suggestion.
+                    //
+                    // The CSP is the one that matters for SVG. An SVG is a document
+                    // that may contain `<script>`, and it is served with an image
+                    // media type — so a diagram written by a prompt-influenced
+                    // agent is stored cross-site scripting the moment something
+                    // renders it as a document rather than as an image.
+                    // `sandbox` with no allowances denies scripts, forms, plugins
+                    // and same-origin access to whatever a blob response is loaded
+                    // into, whatever it turns out to contain.
+                    (
+                        header::HeaderName::from_static("x-content-type-options"),
+                        "nosniff".to_owned(),
+                    ),
+                    (
+                        header::CONTENT_SECURITY_POLICY,
+                        "default-src 'none'; sandbox".to_owned(),
+                    ),
+                ],
+                blob.bytes,
+            )
+                .into_response(),
+            Ok(None) => api_error(
+                StatusCode::NOT_FOUND,
+                codes::INVALID_PARAMS,
+                format!("no blob `{id}`"),
+            ),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
+        }
+    })
+    .await
 }
 
 /// Cross-engine integrity, run inside the process that holds the lock.
@@ -1888,88 +1977,91 @@ async fn api_changes(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let store = state.store();
+    off_runtime(move || {
+        let store = state.store();
 
-    let project_id = match params.get("project") {
-        None => None,
-        Some(reference) => match specline_mcp::resolve_project(&store, reference) {
-            Ok(id) => Some(id),
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": { "code": e.code, "message": e.message } })),
-                )
-                    .into_response();
-            }
-        },
-    };
-
-    let since = match params.get("since") {
-        None => None,
-        Some(raw) => match chrono::DateTime::parse_from_rfc3339(raw) {
-            Ok(t) => Some(t.with_timezone(&chrono::Utc)),
-            Err(_) => {
-                return api_error(
-                    StatusCode::BAD_REQUEST,
-                    codes::INVALID_PARAMS,
-                    specline_core::Error::Invariant {
-                        operation: "read what changed".to_owned(),
-                        problem: format!("`since` is not an RFC 3339 timestamp: {raw}"),
-                    },
-                );
-            }
-        },
-    };
-
-    let actor = match params.get("actor") {
-        None => None,
-        Some(raw) => match specline_core::Actor::parse(raw) {
-            Ok(a) => Some(a),
-            Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
-        },
-    };
-
-    let query = specline_core::ChangeQuery {
-        project_id,
-        since,
-        actor,
-        limit: params
-            .get("limit")
-            .and_then(|l| l.parse::<usize>().ok())
-            .unwrap_or(300)
-            .clamp(1, 2_000),
-    };
-
-    match specline_core::changes::by_session(&store, &query) {
-        Ok(log) => (
-            StatusCode::OK,
-            Json(json!({
-                "data": {
-                    "sessions": log.sessions.iter().map(|s| json!({
-                        "session_id": s.session_id,
-                        "actor": s.actor.as_str(),
-                        "started_at": s.started_at,
-                        "ended_at": s.ended_at,
-                        "headline": s.headline,
-                        "projects": s.projects,
-                        "changes": s.changes.iter().map(|c| json!({
-                            "id": c.id,
-                            "kind": c.kind.as_str(),
-                            "entity_id": c.entity_id.to_string(),
-                            "entity_type": c.entity_type.as_str(),
-                            "reference": c.reference,
-                            "summary": c.summary,
-                            "at": c.at,
-                        })).collect::<Vec<_>>(),
-                    })).collect::<Vec<_>>(),
-                    "changes": log.changes,
-                    "truncated": log.truncated,
+        let project_id = match params.get("project") {
+            None => None,
+            Some(reference) => match specline_mcp::resolve_project(&store, reference) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "error": { "code": e.code, "message": e.message } })),
+                    )
+                        .into_response();
                 }
-            })),
-        )
-            .into_response(),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+            },
+        };
+
+        let since = match params.get("since") {
+            None => None,
+            Some(raw) => match chrono::DateTime::parse_from_rfc3339(raw) {
+                Ok(t) => Some(t.with_timezone(&chrono::Utc)),
+                Err(_) => {
+                    return api_error(
+                        StatusCode::BAD_REQUEST,
+                        codes::INVALID_PARAMS,
+                        specline_core::Error::Invariant {
+                            operation: "read what changed".to_owned(),
+                            problem: format!("`since` is not an RFC 3339 timestamp: {raw}"),
+                        },
+                    );
+                }
+            },
+        };
+
+        let actor = match params.get("actor") {
+            None => None,
+            Some(raw) => match specline_core::Actor::parse(raw) {
+                Ok(a) => Some(a),
+                Err(e) => return api_error(StatusCode::BAD_REQUEST, codes::INVALID_PARAMS, e),
+            },
+        };
+
+        let query = specline_core::ChangeQuery {
+            project_id,
+            since,
+            actor,
+            limit: params
+                .get("limit")
+                .and_then(|l| l.parse::<usize>().ok())
+                .unwrap_or(300)
+                .clamp(1, 2_000),
+        };
+
+        match specline_core::changes::by_session(&store, &query) {
+            Ok(log) => (
+                StatusCode::OK,
+                Json(json!({
+                    "data": {
+                        "sessions": log.sessions.iter().map(|s| json!({
+                            "session_id": s.session_id,
+                            "actor": s.actor.as_str(),
+                            "started_at": s.started_at,
+                            "ended_at": s.ended_at,
+                            "headline": s.headline,
+                            "projects": s.projects,
+                            "changes": s.changes.iter().map(|c| json!({
+                                "id": c.id,
+                                "kind": c.kind.as_str(),
+                                "entity_id": c.entity_id.to_string(),
+                                "entity_type": c.entity_type.as_str(),
+                                "reference": c.reference,
+                                "summary": c.summary,
+                                "at": c.at,
+                            })).collect::<Vec<_>>(),
+                        })).collect::<Vec<_>>(),
+                        "changes": log.changes,
+                        "truncated": log.truncated,
+                    }
+                })),
+            )
+                .into_response(),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
+        }
+    })
+    .await
 }
 
 /// Which rows a reader would struggle with.
@@ -1986,87 +2078,97 @@ async fn api_lint(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let store = state.store();
-    let Some(reference) = params.get("project") else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            codes::INVALID_PARAMS,
-            specline_core::Error::Invariant {
-                operation: "lint a project".to_owned(),
-                problem: "no `project` given, and lint reports on one project at a time".to_owned(),
-            },
-        );
-    };
-    let project = match specline_mcp::resolve_project(&store, reference) {
-        Ok(id) => id,
-        Err(e) => {
-            return (
+    off_runtime(move || {
+        let store = state.store();
+        let Some(reference) = params.get("project") else {
+            return api_error(
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": { "code": e.code, "message": e.message } })),
+                codes::INVALID_PARAMS,
+                specline_core::Error::Invariant {
+                    operation: "lint a project".to_owned(),
+                    problem: "no `project` given, and lint reports on one project at a time"
+                        .to_owned(),
+                },
+            );
+        };
+        let project = match specline_mcp::resolve_project(&store, reference) {
+            Ok(id) => id,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": { "code": e.code, "message": e.message } })),
+                )
+                    .into_response();
+            }
+        };
+        let limit = params.get("limit").and_then(|l| l.parse::<usize>().ok());
+        match specline_core::lint(&store, &project, limit) {
+            Ok(report) => (
+                StatusCode::OK,
+                Json(json!({
+                    "data": {
+                        "findings": report.findings.iter().map(|f| json!({
+                            "check": f.check,
+                            "id": f.id.to_string(),
+                            "reference": f.reference,
+                            "detail": f.detail,
+                        })).collect::<Vec<_>>(),
+                        "by_check": report.by_check().iter()
+                            .map(|(c, n)| json!({ "check": c, "count": n }))
+                            .collect::<Vec<_>>(),
+                        "scanned": report.scanned,
+                        "total": report.total,
+                        "truncated": report.truncated,
+                    }
+                })),
             )
-                .into_response();
+                .into_response(),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
         }
-    };
-    let limit = params.get("limit").and_then(|l| l.parse::<usize>().ok());
-    match specline_core::lint(&store, &project, limit) {
-        Ok(report) => (
-            StatusCode::OK,
-            Json(json!({
-                "data": {
-                    "findings": report.findings.iter().map(|f| json!({
-                        "check": f.check,
-                        "id": f.id.to_string(),
-                        "reference": f.reference,
-                        "detail": f.detail,
-                    })).collect::<Vec<_>>(),
-                    "by_check": report.by_check().iter()
-                        .map(|(c, n)| json!({ "check": c, "count": n }))
-                        .collect::<Vec<_>>(),
-                    "scanned": report.scanned,
-                    "total": report.total,
-                    "truncated": report.truncated,
-                }
-            })),
-        )
-            .into_response(),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+    })
+    .await
 }
 
 async fn api_fsck(State(state): State<AppState>) -> Response {
-    let store = state.store();
-    match specline_core::fsck::check(&store) {
-        Ok(report) => (StatusCode::OK, Json(json!({ "data": report }))).into_response(),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+    off_runtime(move || {
+        let store = state.store();
+        match specline_core::fsck::check(&store) {
+            Ok(report) => (StatusCode::OK, Json(json!({ "data": report }))).into_response(),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
+        }
+    })
+    .await
 }
 
 /// A one-line summary of what is in the store.
 async fn api_status(State(state): State<AppState>) -> Response {
-    use specline_core::{EntityQuery, EntityStore, EntityType};
-    let store = state.store();
-    let counts = (|| -> specline_core::Result<Value> {
-        let projects = store.list(&EntityQuery::default().of_type(EntityType::Project))?;
-        let tasks = store.list(
-            &EntityQuery::default()
-                .of_type(EntityType::Task)
-                .with_status(["todo", "in_progress", "review"]),
-        )?;
-        let questions = store.list(
-            &EntityQuery::default()
-                .of_type(EntityType::Question)
-                .with_status(["open"]),
-        )?;
-        Ok(json!({
-            "projects": projects.total,
-            "open_tasks": tasks.total,
-            "open_questions": questions.total,
-        }))
-    })();
-    match counts {
-        Ok(v) => (StatusCode::OK, Json(json!({ "data": v }))).into_response(),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+    off_runtime(move || {
+        use specline_core::{EntityQuery, EntityStore, EntityType};
+        let store = state.store();
+        let counts = (|| -> specline_core::Result<Value> {
+            let projects = store.list(&EntityQuery::default().of_type(EntityType::Project))?;
+            let tasks = store.list(
+                &EntityQuery::default()
+                    .of_type(EntityType::Task)
+                    .with_status(["todo", "in_progress", "review"]),
+            )?;
+            let questions = store.list(
+                &EntityQuery::default()
+                    .of_type(EntityType::Question)
+                    .with_status(["open"]),
+            )?;
+            Ok(json!({
+                "projects": projects.total,
+                "open_tasks": tasks.total,
+                "open_questions": questions.total,
+            }))
+        })();
+        match counts {
+            Ok(v) => (StatusCode::OK, Json(json!({ "data": v }))).into_response(),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
+        }
+    })
+    .await
 }
 
 /// The tracker as markdown, rendered from the task rows.
@@ -2078,64 +2180,72 @@ async fn api_render_status(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use specline_core::EntityStore as _;
+    off_runtime(move || {
+        use specline_core::EntityStore as _;
 
-    let Some(project) = params.get("project") else {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            codes::INVALID_PARAMS,
-            "`project` is required: a tracker belongs to one project",
-        );
-    };
-    use specline_core::{EntityQuery, EntityType};
+        let Some(project) = params.get("project") else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                codes::INVALID_PARAMS,
+                "`project` is required: a tracker belongs to one project",
+            );
+        };
+        use specline_core::{EntityQuery, EntityType};
 
-    let store = state.store();
-    // Matched by slug, key or name, the same three a person would type. The
-    // CLI resolves the same way; a project the CLI can name and the daemon
-    // cannot would be a difference nobody could explain.
-    let needle = project.to_lowercase();
-    let found = match store.list(&EntityQuery::default().of_type(EntityType::Project)) {
-        Ok(page) => page.items.into_iter().find(|e| match e {
-            specline_core::Entity::Project(p) => {
-                p.slug.to_lowercase() == needle
-                    || p.key.to_lowercase() == needle
-                    || p.name.to_lowercase() == needle
+        let store = state.store();
+        // Matched by slug, key or name, the same three a person would type. The
+        // CLI resolves the same way; a project the CLI can name and the daemon
+        // cannot would be a difference nobody could explain.
+        let needle = project.to_lowercase();
+        let found = match store.list(&EntityQuery::default().of_type(EntityType::Project)) {
+            Ok(page) => page.items.into_iter().find(|e| match e {
+                specline_core::Entity::Project(p) => {
+                    p.slug.to_lowercase() == needle
+                        || p.key.to_lowercase() == needle
+                        || p.name.to_lowercase() == needle
+                }
+                _ => false,
+            }),
+            Err(e) => {
+                return api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e);
             }
-            _ => false,
-        }),
-        Err(e) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    };
-    let Some(found) = found else {
-        return api_error(
-            StatusCode::NOT_FOUND,
-            codes::INVALID_PARAMS,
-            format!("no project named `{project}`"),
-        );
-    };
-    match specline_core::render_status::render(&store, found.id()) {
-        Ok(markdown) => (
-            StatusCode::OK,
-            Json(json!({ "data": { "markdown": markdown } })),
-        )
-            .into_response(),
-        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
-    }
+        };
+        let Some(found) = found else {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                codes::INVALID_PARAMS,
+                format!("no project named `{project}`"),
+            );
+        };
+        match specline_core::render_status::render(&store, found.id()) {
+            Ok(markdown) => (
+                StatusCode::OK,
+                Json(json!({ "data": { "markdown": markdown } })),
+            )
+                .into_response(),
+            Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, codes::INTERNAL_ERROR, e),
+        }
+    })
+    .await
 }
 
 async fn api_activity(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let args = params_to_json("specline_activity", params);
-    let mut store = state.store();
-    as_api(specline_mcp::dispatch(
-        &mut store,
-        specline_mcp::ToolCall {
-            name: "specline_activity",
-            arguments: &args,
-            client: None,
-        },
-    ))
+    off_runtime(move || {
+        let args = params_to_json("specline_activity", params);
+        let mut store = state.store();
+        as_api(specline_mcp::dispatch(
+            &mut store,
+            specline_mcp::ToolCall {
+                name: "specline_activity",
+                arguments: &args,
+                client: None,
+            },
+        ))
+    })
+    .await
 }
 
 /// Resolve a path parameter that may be a ULID or a readable reference.
@@ -2173,19 +2283,22 @@ async fn api_entity(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let mut args = params_to_json("specline_get", params);
-    if let Some(obj) = args.as_object_mut() {
-        obj.insert("ids".to_owned(), json!([id]));
-    }
-    let mut store = state.store();
-    as_api(specline_mcp::dispatch(
-        &mut store,
-        specline_mcp::ToolCall {
-            name: "specline_get",
-            arguments: &args,
-            client: None,
-        },
-    ))
+    off_runtime(move || {
+        let mut args = params_to_json("specline_get", params);
+        if let Some(obj) = args.as_object_mut() {
+            obj.insert("ids".to_owned(), json!([id]));
+        }
+        let mut store = state.store();
+        as_api(specline_mcp::dispatch(
+            &mut store,
+            specline_mcp::ToolCall {
+                name: "specline_get",
+                arguments: &args,
+                client: None,
+            },
+        ))
+    })
+    .await
 }
 
 /// Which editor drove a conversation (KEEL-361).
@@ -2204,36 +2317,39 @@ async fn api_clients(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use specline_core::EntityStore;
+    off_runtime(move || {
+        use specline_core::EntityStore;
 
-    let store = state.store();
-    let found = match params.get("session_id") {
-        // One session, as a list of nought or one, so both arms answer in the
-        // same shape and the caller has one thing to parse either way.
-        Some(session_id) => store.client_for_session(session_id).map(Vec::from_iter),
-        // Ordered by last write, so a limit keeps what somebody is most likely
-        // to be looking at rather than an arbitrary slice.
-        None => {
-            let limit = params
-                .get("limit")
-                .and_then(|l| l.parse::<usize>().ok())
-                .unwrap_or(200)
-                .clamp(1, 1000);
-            store.session_clients(limit)
-        }
-    };
+        let store = state.store();
+        let found = match params.get("session_id") {
+            // One session, as a list of nought or one, so both arms answer in the
+            // same shape and the caller has one thing to parse either way.
+            Some(session_id) => store.client_for_session(session_id).map(Vec::from_iter),
+            // Ordered by last write, so a limit keeps what somebody is most likely
+            // to be looking at rather than an arbitrary slice.
+            None => {
+                let limit = params
+                    .get("limit")
+                    .and_then(|l| l.parse::<usize>().ok())
+                    .unwrap_or(200)
+                    .clamp(1, 1000);
+                store.session_clients(limit)
+            }
+        };
 
-    match found {
-        Ok(clients) => {
-            let rows: Vec<Value> = clients.iter().map(client_row).collect();
-            (
-                StatusCode::OK,
-                Json(json!({ "data": { "clients": rows, "total": rows.len() } })),
-            )
-                .into_response()
+        match found {
+            Ok(clients) => {
+                let rows: Vec<Value> = clients.iter().map(client_row).collect();
+                (
+                    StatusCode::OK,
+                    Json(json!({ "data": { "clients": rows, "total": rows.len() } })),
+                )
+                    .into_response()
+            }
+            Err(e) => internal_error(&e.to_string()),
         }
-        Err(e) => internal_error(&e.to_string()),
-    }
+    })
+    .await
 }
 
 /// One client, as the wire describes it.
@@ -2280,56 +2396,59 @@ async fn api_notes(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use specline_core::EntityStore;
+    off_runtime(move || {
+        use specline_core::EntityStore;
 
-    let counts_only = params.get("counts").is_some_and(|v| v == "true");
-    let store = state.store();
-    let notes = if let Some(entity) = params.get("entity") {
-        match resolve_path_id(&store, entity) {
-            Ok(id) => store.notes_for(&id, params.get("all").is_some_and(|v| v == "true")),
-            Err(response) => return response,
-        }
-    } else if let Some(project) = params.get("project") {
-        match specline_mcp::dispatch::resolve_project(&store, project) {
-            Ok(id) => store.notes_in_project(&id),
-            // `RpcError` is a wire shape, not a Display type — pass it through
-            // as the structured error it already is.
-            Err(e) => {
-                // `RpcError` already serialises as `{code, message}` — the
-                // same shape `api_error` builds — so it is passed through
-                // whole rather than flattened to its message.
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        let counts_only = params.get("counts").is_some_and(|v| v == "true");
+        let store = state.store();
+        let notes = if let Some(entity) = params.get("entity") {
+            match resolve_path_id(&store, entity) {
+                Ok(id) => store.notes_for(&id, params.get("all").is_some_and(|v| v == "true")),
+                Err(response) => return response,
             }
-        }
-    } else {
-        return bad_request(
-            "pass `entity` for one row's notes, or `project` for all of a project's",
-        );
-    };
+        } else if let Some(project) = params.get("project") {
+            match specline_mcp::dispatch::resolve_project(&store, project) {
+                Ok(id) => store.notes_in_project(&id),
+                // `RpcError` is a wire shape, not a Display type — pass it through
+                // as the structured error it already is.
+                Err(e) => {
+                    // `RpcError` already serialises as `{code, message}` — the
+                    // same shape `api_error` builds — so it is passed through
+                    // whole rather than flattened to its message.
+                    return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+                }
+            }
+        } else {
+            return bad_request(
+                "pass `entity` for one row's notes, or `project` for all of a project's",
+            );
+        };
 
-    match notes {
-        Ok(notes) if counts_only => {
-            let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
-            for note in &notes {
-                *counts.entry(note.entity_id.to_string()).or_default() += 1;
+        match notes {
+            Ok(notes) if counts_only => {
+                let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+                for note in &notes {
+                    *counts.entry(note.entity_id.to_string()).or_default() += 1;
+                }
+                (
+                    StatusCode::OK,
+                    Json(json!({ "data": { "counts": counts, "total": notes.len() } })),
+                )
+                    .into_response()
             }
-            (
+            Ok(notes) => (
                 StatusCode::OK,
-                Json(json!({ "data": { "counts": counts, "total": notes.len() } })),
+                Json(json!({ "data": { "notes": notes, "total": notes.len() } })),
             )
-                .into_response()
+                .into_response(),
+            Err(e) => api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                codes::INTERNAL_ERROR,
+                e.to_string(),
+            ),
         }
-        Ok(notes) => (
-            StatusCode::OK,
-            Json(json!({ "data": { "notes": notes, "total": notes.len() } })),
-        )
-            .into_response(),
-        Err(e) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            codes::INTERNAL_ERROR,
-            e.to_string(),
-        ),
-    }
+    })
+    .await
 }
 
 /// List entities with filters.
@@ -2347,45 +2466,51 @@ async fn api_inbox(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    if !state.surfaces.inbox {
-        return inbox_is_off();
-    }
-    let store = state.store();
-    let Some(project) = params.get("project") else {
-        return bad_request("`project` is required — the project id, slug or name");
-    };
-    let project_id = match specline_mcp::dispatch::resolve_project(&store, project) {
-        Ok(id) => id,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
-    };
-    let limit = params
-        .get("limit")
-        .and_then(|l| l.parse::<usize>().ok())
-        .unwrap_or(200);
-
-    match store.inbox(&project_id, limit) {
-        Ok(page) => {
-            let items: Vec<Value> = page.items.iter().map(specline_mcp::entity_json).collect();
-            // The same envelope every other list uses, so a caller does not
-            // have to learn a second shape for the one endpoint that happens
-            // to be newest.
-            Json(json!({
-                "data": {
-                    "items": items,
-                    "total": page.total,
-                    "truncated": page.truncated,
-                }
-            }))
-            .into_response()
+    off_runtime(move || {
+        if !state.surfaces.inbox {
+            return inbox_is_off();
         }
-        Err(e) => internal_error(&format!("the inbox could not be read: {e}")),
-    }
+        let store = state.store();
+        let Some(project) = params.get("project") else {
+            return bad_request("`project` is required — the project id, slug or name");
+        };
+        let project_id = match specline_mcp::dispatch::resolve_project(&store, project) {
+            Ok(id) => id,
+            Err(e) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+            }
+        };
+        let limit = params
+            .get("limit")
+            .and_then(|l| l.parse::<usize>().ok())
+            .unwrap_or(200);
+
+        match store.inbox(&project_id, limit) {
+            Ok(page) => {
+                let items: Vec<Value> = page.items.iter().map(specline_mcp::entity_json).collect();
+                // The same envelope every other list uses, so a caller does not
+                // have to learn a second shape for the one endpoint that happens
+                // to be newest.
+                Json(json!({
+                    "data": {
+                        "items": items,
+                        "total": page.total,
+                        "truncated": page.truncated,
+                    }
+                }))
+                .into_response()
+            }
+            Err(e) => internal_error(&format!("the inbox could not be read: {e}")),
+        }
+    })
+    .await
 }
 
 async fn api_entities(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
+    off_runtime(move || {
     use specline_core::{EntityQuery, EntityStore, EntityType};
 
     let store = state.store();
@@ -2515,6 +2640,8 @@ async fn api_entities(
             e.to_string(),
         ),
     }
+    })
+    .await
 }
 
 /// A document's full revision history, and optionally a diff.
@@ -2523,52 +2650,55 @@ async fn api_document(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let store = state.store();
-    let entity_id = match resolve_path_id(&store, &id) {
-        Ok(i) => i,
-        Err(response) => return response,
-    };
+    off_runtime(move || {
+        let store = state.store();
+        let entity_id = match resolve_path_id(&store, &id) {
+            Ok(i) => i,
+            Err(response) => return response,
+        };
 
-    let history = store.revisions(&entity_id).unwrap_or_default();
-    let current = params
-        .get("version")
-        .and_then(|v| v.parse::<i32>().ok())
-        .or_else(|| history.last().map(|d| d.version));
+        let history = store.revisions(&entity_id).unwrap_or_default();
+        let current = params
+            .get("version")
+            .and_then(|v| v.parse::<i32>().ok())
+            .or_else(|| history.last().map(|d| d.version));
 
-    let body = current.and_then(|v| history.iter().find(|d| d.version == v).cloned());
+        let body = current.and_then(|v| history.iter().find(|d| d.version == v).cloned());
 
-    let diff = match (
-        params
-            .get("diff_against")
-            .and_then(|v| v.parse::<i32>().ok()),
-        current,
-    ) {
-        (Some(other), Some(v)) => store
-            .diff(&entity_id, other.min(v), other.max(v))
-            .ok()
-            .map(|d| serde_json::to_value(d).unwrap_or(Value::Null)),
-        _ => None,
-    };
+        let diff = match (
+            params
+                .get("diff_against")
+                .and_then(|v| v.parse::<i32>().ok()),
+            current,
+        ) {
+            (Some(other), Some(v)) => store
+                .diff(&entity_id, other.min(v), other.max(v))
+                .ok()
+                .map(|d| serde_json::to_value(d).unwrap_or(Value::Null)),
+            _ => None,
+        };
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "data": {
-                "revisions": history.iter().map(|d| json!({
-                    "version": d.version,
-                    "title": d.title,
-                    "author": d.author,
-                    "session_id": d.session_id,
-                    "surface": d.surface,
-                    "created_at": d.created_at,
-                    "status": d.status,
-                })).collect::<Vec<_>>(),
-                "document": body,
-                "diff": diff,
-            }
-        })),
-    )
-        .into_response()
+        (
+            StatusCode::OK,
+            Json(json!({
+                "data": {
+                    "revisions": history.iter().map(|d| json!({
+                        "version": d.version,
+                        "title": d.title,
+                        "author": d.author,
+                        "session_id": d.session_id,
+                        "surface": d.surface,
+                        "created_at": d.created_at,
+                        "status": d.status,
+                    })).collect::<Vec<_>>(),
+                    "document": body,
+                    "diff": diff,
+                }
+            })),
+        )
+            .into_response()
+    })
+    .await
 }
 
 /// The graph around an entity.
@@ -2577,37 +2707,40 @@ async fn api_graph(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    use specline_core::{DEFAULT_DEPTH, Direction, GraphStore};
+    off_runtime(move || {
+        use specline_core::{DEFAULT_DEPTH, Direction, GraphStore};
 
-    let store = state.store();
-    let entity_id = match resolve_path_id(&store, &id) {
-        Ok(i) => i,
-        Err(response) => return response,
-    };
-    let direction = params
-        .get("direction")
-        .and_then(|d| Direction::parse(d).ok())
-        .unwrap_or(Direction::Both);
-    let depth = params
-        .get("depth")
-        .and_then(|d| d.parse::<u8>().ok())
-        .unwrap_or(DEFAULT_DEPTH);
+        let store = state.store();
+        let entity_id = match resolve_path_id(&store, &id) {
+            Ok(i) => i,
+            Err(response) => return response,
+        };
+        let direction = params
+            .get("direction")
+            .and_then(|d| Direction::parse(d).ok())
+            .unwrap_or(Direction::Both);
+        let depth = params
+            .get("depth")
+            .and_then(|d| d.parse::<u8>().ok())
+            .unwrap_or(DEFAULT_DEPTH);
 
-    match store.neighbours(&entity_id, direction, &[], depth) {
-        Ok(neighbours) => {
-            let links = store.links_of(&entity_id, direction).unwrap_or_default();
-            (
-                StatusCode::OK,
-                Json(json!({ "data": { "neighbours": neighbours, "links": links } })),
-            )
-                .into_response()
+        match store.neighbours(&entity_id, direction, &[], depth) {
+            Ok(neighbours) => {
+                let links = store.links_of(&entity_id, direction).unwrap_or_default();
+                (
+                    StatusCode::OK,
+                    Json(json!({ "data": { "neighbours": neighbours, "links": links } })),
+                )
+                    .into_response()
+            }
+            Err(e) => api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                codes::INTERNAL_ERROR,
+                e.to_string(),
+            ),
         }
-        Err(e) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            codes::INTERNAL_ERROR,
-            e.to_string(),
-        ),
-    }
+    })
+    .await
 }
 
 /// Live change notifications for the desktop app.

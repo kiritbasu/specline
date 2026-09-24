@@ -35,6 +35,7 @@ pub mod ratelimit;
 pub mod run;
 pub mod site;
 pub mod state;
+pub mod watchdog;
 
 pub use http::{TOKEN_HEADER, router};
 pub use run::run;
