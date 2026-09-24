@@ -127,9 +127,10 @@ landing in `~/.cargo/bin`.
 tools will not appear in the session you installed from.
 
 There is no `claude mcp add` to run and no `settings.json` to edit. Installing
-the plugin also installs two session hooks: one puts a summary of the project at
-the top of every conversation, and one asks a session that recorded nothing
-whether it should have.
+the plugin also installs three hooks: one puts a summary of the project at the
+top of every conversation, one tells the session once when it commits work that
+names no task and has nothing claimed, and one asks a session that recorded
+nothing whether it should have.
 
 To check the install:
 
