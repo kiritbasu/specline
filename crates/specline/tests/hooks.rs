@@ -79,6 +79,10 @@ fn run_hook(which: &str, daemon: &str, payload: &str, tmpdir: &std::path::Path) 
     let mut child = Command::new(env!("CARGO_BIN_EXE_specline"))
         .args(["hook", which, "--daemon", daemon])
         .env("TMPDIR", tmpdir)
+        // Session start reads Claude Code's settings to say which hooks are
+        // wired (KEEL-396). Point it at the test's own directory, so a test
+        // never reads the developer's real ~/.claude.
+        .env("CLAUDE_CONFIG_DIR", tmpdir)
         // The commit hook runs git, and a developer's own config (signing,
         // `log.showSignature`) must not decide what a test sees.
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -1110,4 +1114,64 @@ fn commit_survives_a_payload_it_cannot_parse() {
     let (stdout, code) = run_hook("commit", "http://127.0.0.1:1", "{not json", tmp.path());
     assert_eq!(code, 0);
     assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+// --- which hooks are wired (KEEL-396) -----------------------------------------
+
+#[test]
+fn session_start_says_when_the_commit_and_stop_hooks_are_not_wired() {
+    let dir = scratch();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/x/specline-hook.sh session-start"}]}]}}"#,
+    )
+    .unwrap();
+    let daemon = stub_daemon(MATCHED, NO_EVENTS);
+
+    let (stdout, code) = run_hook(
+        "session-start",
+        &daemon,
+        &format!(
+            r#"{{"cwd":"{}","session_id":"abc123","source":"startup"}}"#,
+            dir.path().display()
+        ),
+        dir.path(),
+    );
+
+    assert_eq!(code, 0);
+    let context = injected_context(&stdout);
+    assert!(
+        context.contains("do the thing"),
+        "the digest is still there: {context}"
+    );
+    assert!(context.contains("the commit hook"), "{context}");
+    assert!(context.contains("specline doctor"), "{context}");
+}
+
+#[test]
+fn session_start_says_nothing_extra_when_every_hook_is_wired() {
+    let dir = scratch();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"hooks":{
+            "SessionStart":[{"hooks":[{"type":"command","command":"/x/specline-hook.sh session-start"}]}],
+            "PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/x/specline-hook.sh commit"}]}],
+            "Stop":[{"hooks":[{"type":"command","command":"/x/specline-hook.sh stop"}]}]
+        }}"#,
+    )
+    .unwrap();
+    let daemon = stub_daemon(MATCHED, NO_EVENTS);
+
+    let (stdout, _) = run_hook(
+        "session-start",
+        &daemon,
+        &format!(
+            r#"{{"cwd":"{}","session_id":"abc123","source":"startup"}}"#,
+            dir.path().display()
+        ),
+        dir.path(),
+    );
+
+    let context = injected_context(&stdout);
+    assert!(!context.contains("partly set up"), "{context}");
 }

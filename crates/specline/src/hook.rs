@@ -270,6 +270,28 @@ fn unreachable_notice(daemon: &str) -> String {
     )
 }
 
+/// How long session start will wait to learn which hooks are wired.
+///
+/// The files are small, but the project's live on whatever volume the session
+/// is in, and on 2026-09-24 that volume stalled an `open()` for minutes
+/// (KEEL-403). This hook has ten seconds in all and the digest matters more
+/// than the notice, so the read gets a fraction of a second on a side thread
+/// and is abandoned, not waited for.
+const WIRING_BUDGET: Duration = Duration::from_millis(300);
+
+/// [`crate::wiring::session_notice`] for `directory`, or `None` if reading the
+/// settings takes longer than `budget`.
+fn wiring_notice_within(directory: String, budget: Duration) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let notice = crate::wiring::examine(Some(std::path::Path::new(&directory)))
+            .as_ref()
+            .and_then(crate::wiring::session_notice);
+        let _ = tx.send(notice);
+    });
+    rx.recv_timeout(budget).ok().flatten()
+}
+
 /// Put the digest into the session before anything else does.
 ///
 /// Always exits 0. Prints nothing when the daemon answered and had nothing
@@ -296,7 +318,13 @@ pub fn session_start(daemon: &str) {
         // that silence is the deliberate one: a directory Specline has never
         // heard of has nothing to say and should not spend context saying it.
         Some(body) => match session_start_context(&body, payload.session_id.as_deref()) {
-            Some(context) => context,
+            // One line, and only when something is wrong: a hook that is
+            // installed and never runs looks exactly like Specline having
+            // nothing to say, and nobody runs `doctor` unprompted (KEEL-396).
+            Some(context) => match wiring_notice_within(payload.directory(), WIRING_BUDGET) {
+                Some(notice) => format!("{context}\n\n{notice}"),
+                None => context,
+            },
             None => return,
         },
         None => unreachable_notice(daemon),

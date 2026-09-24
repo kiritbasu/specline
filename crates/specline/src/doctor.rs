@@ -428,6 +428,9 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
     // --- The one thing that leaves this machine ---------------------------
     checks.push(update_check());
 
+    // --- The session hooks -------------------------------------------------
+    checks.push(hooks_check());
+
     // --- Backups ----------------------------------------------------------
     checks.push(backup_age(home));
 
@@ -439,6 +442,158 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
     checks.push(clock_sanity(&store)?);
 
     Ok(Report { checks })
+}
+
+/// Whether Specline's three Claude Code hooks are wired, once each (KEEL-396).
+///
+/// Degraded rather than a problem in every case: the store is fine either
+/// way, and a setup that uses the MCP server alone is a choice. What this
+/// catches is the hook installed and never run — which looks exactly like
+/// Specline having nothing to say — and the hook wired twice, which injects
+/// the digest into every session twice.
+fn hooks_check() -> Check {
+    let project = std::env::current_dir().ok();
+    let mut check = hooks_check_for(crate::wiring::examine(project.as_deref()));
+    // Project settings are read from where this was run, which may not be
+    // where the sessions run. Saying so turns a puzzling "not wired" into an
+    // obvious one.
+    if let Some(dir) = project {
+        check.detail = format!(
+            "{} (project settings looked for in {})",
+            check.detail,
+            dir.display()
+        );
+    }
+    check
+}
+
+/// [`hooks_check`], given what was found — pure, so the tests can reach it.
+fn hooks_check_for(wiring: Option<crate::wiring::Wiring>) -> Check {
+    let Some(wiring) = wiring else {
+        return Check::ok(
+            "hooks",
+            "no Claude Code directory to look in (HOME and CLAUDE_CONFIG_DIR are unset)",
+        );
+    };
+    let unreadable = if wiring.unreadable.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Could not read {}, so a hook wired there would not show up here.",
+            wiring.unreadable.join(", ")
+        )
+    };
+    const FIX: &str = "Install the plugin with `/plugin install specline@specline`, or add \
+                       the settings snippet `plugin/install.sh` prints";
+
+    if let Some(by) = &wiring.disabled_by {
+        return Check::degraded(
+            "hooks",
+            format!("{by} sets disableAllHooks, so no hook runs, Specline's included.{unreadable}"),
+            "Remove disableAllHooks if the hooks are meant to run",
+        );
+    }
+    if !wiring.any() {
+        return Check::degraded(
+            "hooks",
+            format!(
+                "no Specline hook is wired for Claude Code, so sessions start without the \
+                 project digest and nothing notices unrecorded work.{unreadable}"
+            ),
+            FIX,
+        );
+    }
+    let missing = wiring.missing();
+    let doubled = wiring.duplicated();
+    let wired: Vec<String> = wiring
+        .hooks
+        .iter()
+        .filter(|f| !f.wired_by.is_empty())
+        .map(|f| {
+            format!(
+                "{} (from {})",
+                f.expected.subcommand,
+                f.wired_by.join(" and ")
+            )
+        })
+        .collect();
+
+    if !missing.is_empty() {
+        let names: Vec<String> = missing
+            .iter()
+            .map(|f| format!("{}, which {}", f.expected.subcommand, f.expected.purpose))
+            .collect();
+        // Where the others came from decides the fix. Pointing someone whose
+        // hooks are hand-wired at the plugin would wire everything twice.
+        let home_of_the_rest = wiring
+            .hooks
+            .iter()
+            .find_map(|f| f.wired_by.first())
+            .cloned()
+            .unwrap_or_default();
+        let remedy = if home_of_the_rest.starts_with("the Specline plugin") {
+            "Update the plugin (`/plugin marketplace update specline`, then restart Claude \
+             Code): the installed copy predates the missing hook"
+                .to_owned()
+        } else {
+            format!(
+                "Add the missing entries to {home_of_the_rest}, beside the others — the \
+                 settings snippet `plugin/install.sh` prints has every one"
+            )
+        };
+        return Check::degraded(
+            "hooks",
+            format!(
+                "not wired: {}. Wired: {}.{}{unreadable}",
+                names.join("; "),
+                wired.join(", "),
+                if doubled.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " Also wired more than once: {}.",
+                        doubled
+                            .iter()
+                            .map(|f| f.expected.subcommand)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            ),
+            remedy,
+        );
+    }
+    if !doubled.is_empty() {
+        let names: Vec<String> = doubled
+            .iter()
+            .map(|f| {
+                format!(
+                    "{} (from {})",
+                    f.expected.subcommand,
+                    f.wired_by.join(" and ")
+                )
+            })
+            .collect();
+        return Check::degraded(
+            "hooks",
+            format!(
+                "wired more than once, so each event runs it more than once: {}.{unreadable}",
+                names.join(", ")
+            ),
+            "Keep one: either the plugin, or the entries in settings.json, not both",
+        );
+    }
+    if !unreadable.is_empty() {
+        return Check::degraded(
+            "hooks",
+            format!("all three hooks wired: {}.{unreadable}", wired.join(", ")),
+            "Fix or remove the unreadable file",
+        );
+    }
+    Check::ok(
+        "hooks",
+        format!("all three hooks wired: {}", wired.join(", ")),
+    )
 }
 
 /// How many current revisions there are, and how many lack an embedding.
@@ -768,6 +923,76 @@ mod tests {
             .filter(|c| c.level == Level::Problem)
             .map(|c| (c.name.as_str(), c.detail.as_str()))
             .collect()
+    }
+
+    // --- hooks (KEEL-396) ----------------------------------------------
+
+    fn wiring_from(label: &str, hooks: serde_json::Value) -> crate::wiring::Wiring {
+        crate::wiring::inspect(
+            &[crate::wiring::Source {
+                label: label.into(),
+                content: serde_json::json!({ "hooks": hooks }),
+            }],
+            vec![],
+        )
+    }
+
+    fn only_session_hooks(prefix: &str) -> serde_json::Value {
+        serde_json::json!({
+            "SessionStart": [{"hooks": [{"type": "command", "command": format!("{prefix} session-start")}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": format!("{prefix} stop")}]}],
+        })
+    }
+
+    #[test]
+    fn hand_wired_hooks_missing_one_are_told_to_add_it_beside_the_others() {
+        let check = hooks_check_for(Some(wiring_from(
+            "/home/you/.claude/settings.json",
+            only_session_hooks("/x/specline-hook.sh"),
+        )));
+        assert_eq!(check.level, Level::Degraded);
+        assert!(
+            check.detail.contains("not wired: commit"),
+            "{}",
+            check.detail
+        );
+        assert!(
+            check.remedy.contains("/home/you/.claude/settings.json"),
+            "{}",
+            check.remedy
+        );
+        assert!(
+            !check.remedy.contains("/plugin install"),
+            "installing the plugin on top of hand-wired hooks would run them twice: {}",
+            check.remedy
+        );
+    }
+
+    #[test]
+    fn a_stale_plugin_missing_one_is_told_to_update() {
+        let check = hooks_check_for(Some(wiring_from(
+            "the Specline plugin (specline@specline)",
+            only_session_hooks("/p/specline-hook.sh"),
+        )));
+        assert!(
+            check.remedy.contains("/plugin marketplace update"),
+            "{}",
+            check.remedy
+        );
+    }
+
+    #[test]
+    fn nothing_wired_and_no_directory_are_different_findings() {
+        let none = hooks_check_for(Some(wiring_from("u", serde_json::json!({}))));
+        assert_eq!(none.level, Level::Degraded);
+        assert!(none.remedy.contains("/plugin install"), "{}", none.remedy);
+
+        let no_dir = hooks_check_for(None);
+        assert_eq!(
+            no_dir.level,
+            Level::Ok,
+            "nothing to look at is not a finding"
+        );
     }
 
     fn find<'a>(report: &'a Report, name: &str) -> &'a Check {

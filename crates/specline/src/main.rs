@@ -15,6 +15,7 @@ mod generate;
 mod hook;
 mod import;
 mod rubric;
+mod wiring;
 mod work;
 mod writes;
 
