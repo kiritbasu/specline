@@ -1223,6 +1223,26 @@ fn fake_gh_script(body: &str) -> tempfile::TempDir {
     bin
 }
 
+/// A PATH with the fake `gh` first, then the directory of a real `git`, then
+/// the system tools.
+///
+/// The real git matters (KEEL-413). On a Mac `/usr/bin/git` is a shim that
+/// asks `xcrun` where the real one is, and under a full `cargo test
+/// --workspace` that lookup alone could use up the CI check's 2.2 seconds, so
+/// the CI line went missing and the test failed only when everything ran at
+/// once. The first `git` on this process's own PATH is used — Homebrew's, or
+/// the distribution's on Linux — and the shim stays as a last resort.
+fn path_with_fake_gh(bin: &std::path::Path) -> String {
+    let real_git_dir = std::env::var_os("PATH")
+        .and_then(|path| {
+            std::env::split_paths(&path)
+                .find(|dir| dir.join("git").is_file() && dir != std::path::Path::new("/usr/bin"))
+        })
+        .map(|dir| format!("{}:", dir.display()))
+        .unwrap_or_default();
+    format!("{}:{real_git_dir}/usr/bin:/bin", bin.display())
+}
+
 /// Session start in `repo`, with `bin` ahead of the system tools on PATH.
 fn session_start_with_gh(daemon: &str, repo: &std::path::Path, bin: &std::path::Path) -> String {
     let tmp = scratch();
@@ -1232,7 +1252,7 @@ fn session_start_with_gh(daemon: &str, repo: &std::path::Path, bin: &std::path::
         .env("CLAUDE_CONFIG_DIR", tmp.path())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("PATH", path_with_fake_gh(bin))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
