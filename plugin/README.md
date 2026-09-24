@@ -12,7 +12,8 @@ nothing.
 | `specline hook session-start` | Injects the digest before the first word. | **The session identity**, and "record it, don't offer to". |
 | `skills/specline/SKILL.md` | Teaches Claude *what* belongs where. This is the load-bearing part. | **When to write, and what to write.** |
 | `specline hook stop` | Speaks only to a session that recorded nothing. | **The end-of-session check**, in one sentence. |
-| `hooks/specline-hook.sh` | Execs the two above, or says the binary is missing. | **Nothing.** It is the only part that must run without Specline. |
+| `specline hook commit` | After a Bash call, speaks once if a fresh commit names no task and the session has claimed nothing. Never blocks. | **The moment-of-commit check** (KEEL-395). |
+| `hooks/specline-hook.sh` | Execs the three above, or says the binary is missing. | **Nothing.** It is the only part that must run without Specline. |
 
 The session identity is the hook's because Claude Code already assigns one and
 the model inventing its own produced collisions: two date-based ids landed on

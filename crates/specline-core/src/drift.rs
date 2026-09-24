@@ -478,6 +478,19 @@ fn keys_in(message: &str, key: &str) -> Vec<Named> {
     found
 }
 
+/// Whether a commit message names any task of the project whose key is `key`.
+///
+/// Public for the commit hook (KEEL-395), which has to ask the same question
+/// this module asks of the git log, at the moment of the commit rather than in
+/// the next digest. Sharing the parser is the point: two readings of "names a
+/// task" would let the hook stay quiet about a commit the digest then reports,
+/// or the other way round. A key too long to be a number still counts as
+/// named — the author meant a task, and whether it exists is the digest's
+/// question, not this one's.
+pub fn names_a_task(message: &str, key: &str) -> bool {
+    !keys_in(message, key).is_empty()
+}
+
 /// Whether a task's evidence cites this commit.
 ///
 /// Case-insensitive on the hex, because some interfaces copy a sha in upper
@@ -523,6 +536,16 @@ mod tests {
                 Named::Unparseable(s) => panic!("{s} should have parsed"),
             })
             .collect()
+    }
+
+    #[test]
+    fn a_message_names_a_task_only_with_a_real_key() {
+        assert!(names_a_task("fix: the thing (KEEL-42)", "KEEL"));
+        assert!(names_a_task("KEEL-99999999999 overflowed", "KEEL"));
+        assert!(!names_a_task("fix: the thing", "KEEL"));
+        assert!(!names_a_task("STEEL-42 is another project", "KEEL"));
+        assert!(!names_a_task("keel-42 is the wrong case", "KEEL"));
+        assert!(!names_a_task("KEEL-42", ""), "an empty key names nothing");
     }
 
     #[test]

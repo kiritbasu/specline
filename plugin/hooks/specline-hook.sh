@@ -19,7 +19,7 @@
 # Nothing here holds logic worth testing. Everything that does is in
 # `specline hook`, with `crates/specline/tests/hooks.rs` running it for real.
 #
-# Usage: specline-hook.sh session-start | stop
+# Usage: specline-hook.sh session-start | stop | commit
 
 set -u
 

@@ -84,15 +84,17 @@ fn the_mcp_server_talks_to_the_daemon_over_http() {
     );
 }
 
-/// Both hooks must run something that is actually on disk.
+/// Every hook must run something that is actually on disk.
 #[test]
 fn every_hook_names_a_script_that_exists_and_is_executable() {
     let hooks = json_at("plugin/hooks/hooks.json");
     let events = hooks["hooks"].as_object().expect("hooks is an object");
-    assert!(
-        events.contains_key("SessionStart") && events.contains_key("Stop"),
-        "both session hooks should be registered"
-    );
+    for event in ["SessionStart", "Stop", "PostToolUse"] {
+        assert!(
+            events.contains_key(event),
+            "the {event} hook should be registered"
+        );
+    }
 
     let mut checked = 0;
     for (event, entries) in events {
@@ -115,7 +117,27 @@ fn every_hook_names_a_script_that_exists_and_is_executable() {
             }
         }
     }
-    assert!(checked >= 2, "expected both hooks to be checked");
+    assert!(checked >= 3, "expected all three hooks to be checked");
+}
+
+/// The commit hook runs after Bash and nothing else (KEEL-395).
+///
+/// Without the matcher it would start a process after every Read and Edit
+/// as well, to leave at once — cost for nothing, on the busiest path there is.
+#[test]
+fn the_commit_hook_runs_only_after_bash() {
+    let hooks = json_at("plugin/hooks/hooks.json");
+    let entries = hooks["hooks"]["PostToolUse"]
+        .as_array()
+        .expect("PostToolUse is registered");
+    assert!(!entries.is_empty());
+    for entry in entries {
+        assert_eq!(entry["matcher"], "Bash", "{entry}");
+        for hook in entry["hooks"].as_array().expect("hooks is an array") {
+            let command = hook["command"].as_str().expect("a command");
+            assert!(command.ends_with(" commit"), "{command}");
+        }
+    }
 }
 
 /// The slash command's whole job is to run one script. If it names a file that

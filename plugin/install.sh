@@ -82,7 +82,7 @@ install_skill() {
   mkdir -p "$adopt_dir"
   install_file "$repo_root/plugin/skills/specline-adopt/SKILL.md" "$adopt_dir/SKILL.md" 644
   # One shim now, not two scripts. KEEL-206 moved the logic into the binary as
-  # `specline hook session-start` and `specline hook stop`; what is left here is the
+  # `specline hook session-start`, `stop` and (KEEL-395) `commit`; what is left here is the
   # only part that has to run *without* the binary, so a session between
   # installing the plugin and running setup can say the binary is missing.
   install_file "$repo_root/plugin/hooks/specline-hook.sh" "$skill_dir/specline-hook.sh" 755
@@ -121,6 +121,13 @@ FORWARD
     note ""
     note "NOTE: $settings does not reference these hooks, so they will not run."
     note "See the settings snippet printed at the end."
+  elif [ -f "$settings" ] && ! grep -q "$skill_dir/specline-hook.sh commit" "$settings" 2>/dev/null; then
+    # The case this line exists for: a settings file wired before KEEL-395
+    # runs the session hooks and looks complete, and the commit hook — which
+    # the plugin gets from hooks.json — simply never fires here.
+    note ""
+    note "NOTE: $settings wires the session hooks but not the commit hook."
+    note "Add the PostToolUse entry from the settings snippet printed at the end."
   fi
 }
 
@@ -214,6 +221,11 @@ cat <<EOF
            "SessionStart": [
              { "hooks": [ { "type": "command", "timeout": 10,
                  "command": "$skill_dir/specline-hook.sh session-start" } ] }
+           ],
+           "PostToolUse": [
+             { "matcher": "Bash",
+               "hooks": [ { "type": "command", "timeout": 10,
+                 "command": "$skill_dir/specline-hook.sh commit" } ] }
            ],
            "Stop": [
              { "hooks": [ { "type": "command", "timeout": 15,

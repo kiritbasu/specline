@@ -23,6 +23,12 @@ use std::process::{Command, Stdio};
 /// a one-shot stub would make the second one fail — which is a silent path, so
 /// the test would pass for the wrong reason.
 fn stub_daemon(context: &'static str, activity: &'static str) -> String {
+    stub_daemon_routes(vec![("/api/activity", activity)], context)
+}
+
+/// A daemon that answers each path prefix with its body, and anything else
+/// with `fallback`.
+fn stub_daemon_routes(routes: Vec<(&'static str, &'static str)>, fallback: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
 
@@ -46,11 +52,10 @@ fn stub_daemon(context: &'static str, activity: &'static str) -> String {
                 }
             }
 
-            let body = if request_line.contains("/api/activity") {
-                activity
-            } else {
-                context
-            };
+            let body = routes
+                .iter()
+                .find(|(path, _)| request_line.contains(path))
+                .map_or(fallback, |(_, body)| body);
             let _ = socket.write_all(
                 format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
@@ -74,6 +79,10 @@ fn run_hook(which: &str, daemon: &str, payload: &str, tmpdir: &std::path::Path) 
     let mut child = Command::new(env!("CARGO_BIN_EXE_specline"))
         .args(["hook", which, "--daemon", daemon])
         .env("TMPDIR", tmpdir)
+        // The commit hook runs git, and a developer's own config (signing,
+        // `log.showSignature`) must not decide what a test sees.
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -650,6 +659,8 @@ fn git(cwd: &std::path::Path, args: &[&str]) {
     let out = Command::new("git")
         .current_dir(cwd)
         .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_AUTHOR_NAME", "T")
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_NAME", "T")
@@ -846,4 +857,257 @@ fn a_store_relocation_does_not_land_in_a_json_payload() {
         !stdout.contains("moved your store"),
         "but not on the stream the payload goes to: stdout was {stdout:?}"
     );
+}
+
+// --- commit -----------------------------------------------------------------
+//
+// A real repository and a real commit, because the part of this hook most
+// likely to be wrong is the part that asks git what just happened.
+
+const PROJECT: &str =
+    r#"{"summary":"s","data":{"project":{"id":"prj_1","key":"KEEL","slug":"specline"}}}"#;
+const NO_PROJECT: &str = r#"{"summary":"s","data":{"project":null}}"#;
+const NO_CLAIMS: &str = r#"{"data":{"items":[],"total":0,"truncated":false}}"#;
+const CLAIMED: &str =
+    r#"{"data":{"items":[{"claimed_by":"ses_abc123"}],"total":1,"truncated":false}}"#;
+const QUIET_FEED: &str = r#"{"data":{"events":[],"truncated":false}}"#;
+const JUST_CLOSED: &str = r#"{"data":{"events":[{"entity_type":"task","session_id":"ses_abc123","action":"status_changed"}],"truncated":false}}"#;
+
+/// The exact claim query. A stub that answered any `/api/entities` request
+/// could not tell a right query from a wrong one — drop the status filter and
+/// every test here would still pass.
+const CLAIM_QUERY: &str = "/api/entities?project=prj_1&type=task&status=in_progress";
+
+/// A daemon for the commit hook: the project, an activity feed, and the
+/// in-progress list under its exact query.
+fn commit_daemon(feed: &'static str, claims: &'static str) -> String {
+    stub_daemon_routes(
+        vec![("/api/activity", feed), (CLAIM_QUERY, claims)],
+        PROJECT,
+    )
+}
+
+/// A repository whose `HEAD` is a commit with this message, made just now
+/// unless `committer_date` says otherwise.
+fn repo_with_commit(message: &str, committer_date: Option<&str>) -> tempfile::TempDir {
+    let repo = scratch();
+    git(repo.path(), &["init", "-q"]);
+    std::fs::write(repo.path().join("f"), "x").unwrap();
+    git(repo.path(), &["add", "f"]);
+    let mut commit = Command::new("git");
+    commit
+        .current_dir(repo.path())
+        .args(["commit", "-q", "--no-verify", "-m", message])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "T")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "T")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com");
+    if let Some(date) = committer_date {
+        commit.env("GIT_COMMITTER_DATE", date);
+    }
+    let out = commit.output().expect("git runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    repo
+}
+
+fn bash_payload(cwd: &std::path::Path, command: &str) -> String {
+    serde_json::json!({
+        "session_id": "abc123",
+        "cwd": cwd.display().to_string(),
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": command },
+    })
+    .to_string()
+}
+
+fn commit_notice_in(stdout: &str) -> String {
+    let parsed: serde_json::Value = serde_json::from_str(stdout)
+        .unwrap_or_else(|e| panic!("a hook must print valid JSON, got {stdout:?}: {e}"));
+    let output = &parsed["hookSpecificOutput"];
+    assert_eq!(output["hookEventName"], "PostToolUse", "{parsed}");
+    output["additionalContext"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn commit_tells_the_agent_about_a_commit_no_row_describes() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: something unfiled", None);
+    let daemon = commit_daemon(QUIET_FEED, NO_CLAIMS);
+
+    let (stdout, code) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "git commit -m 'fix: something unfiled'"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    let notice = commit_notice_in(&stdout);
+    assert!(notice.contains("fix: something unfiled"), "{notice}");
+    assert!(notice.contains("KEEL"), "{notice}");
+}
+
+#[test]
+fn commit_says_it_once_per_session() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: unfiled", None);
+    let daemon = commit_daemon(QUIET_FEED, NO_CLAIMS);
+    let payload = bash_payload(repo.path(), "git commit -m x");
+
+    let (first, _) = run_hook("commit", &daemon, &payload, tmp.path());
+    let (second, code) = run_hook("commit", &daemon, &payload, tmp.path());
+
+    assert!(!first.trim().is_empty(), "the first commit is told");
+    assert_eq!(code, 0);
+    assert!(second.trim().is_empty(), "and never again: {second}");
+}
+
+#[test]
+fn commit_is_silent_when_the_message_names_a_task() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: the thing (KEEL-42)", None);
+    let daemon = commit_daemon(QUIET_FEED, NO_CLAIMS);
+
+    let (stdout, code) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "git commit -m x"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+#[test]
+fn commit_is_silent_when_the_session_holds_a_claim() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: unfiled", None);
+    let daemon = commit_daemon(QUIET_FEED, CLAIMED);
+
+    let (stdout, code) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "git commit -m x"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+#[test]
+fn commit_is_silent_in_a_repository_specline_does_not_know() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: unfiled", None);
+    let daemon = stub_daemon_routes(
+        vec![("/api/activity", QUIET_FEED), (CLAIM_QUERY, NO_CLAIMS)],
+        NO_PROJECT,
+    );
+
+    let (stdout, code) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "git commit -m x"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+/// The contract's end-of-session order: close the task (which releases the
+/// claim), regenerate, commit. Doing it right must not draw the notice.
+#[test]
+fn commit_is_silent_right_after_this_session_closed_a_task() {
+    let tmp = scratch();
+    let repo = repo_with_commit("chore: regenerate", None);
+    let daemon = commit_daemon(JUST_CLOSED, NO_CLAIMS);
+
+    let (stdout, code) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "git commit -m 'chore: regenerate'"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+/// An old `HEAD` is a commit somebody made earlier, not one this call made.
+#[test]
+fn commit_is_silent_when_head_is_not_fresh() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: unfiled", Some("2020-01-01T00:00:00Z"));
+    let daemon = commit_daemon(QUIET_FEED, NO_CLAIMS);
+
+    let (stdout, code) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "git log --grep commit"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+#[test]
+fn commit_is_silent_when_no_daemon_answers() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: unfiled", None);
+
+    let (stdout, code) = run_hook(
+        "commit",
+        "http://127.0.0.1:1",
+        &bash_payload(repo.path(), "git commit -m x"),
+        tmp.path(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
+}
+
+/// Every Bash call reaches this hook, so a command that is not a commit must
+/// leave before it asks git or the daemon anything.
+#[test]
+fn commit_ignores_commands_and_tools_that_cannot_commit() {
+    let tmp = scratch();
+    let repo = repo_with_commit("fix: unfiled", None);
+    let daemon = commit_daemon(QUIET_FEED, NO_CLAIMS);
+
+    let (not_a_commit, _) = run_hook(
+        "commit",
+        &daemon,
+        &bash_payload(repo.path(), "cargo test"),
+        tmp.path(),
+    );
+    let edit = serde_json::json!({
+        "session_id": "abc123",
+        "cwd": repo.path().display().to_string(),
+        "tool_name": "Edit",
+        "tool_input": { "command": "git commit" },
+    })
+    .to_string();
+    let (not_bash, code) = run_hook("commit", &daemon, &edit, tmp.path());
+
+    assert_eq!(code, 0);
+    assert!(not_a_commit.trim().is_empty(), "{not_a_commit}");
+    assert!(not_bash.trim().is_empty(), "{not_bash}");
+}
+
+#[test]
+fn commit_survives_a_payload_it_cannot_parse() {
+    let tmp = scratch();
+    let (stdout, code) = run_hook("commit", "http://127.0.0.1:1", "{not json", tmp.path());
+    assert_eq!(code, 0);
+    assert!(stdout.trim().is_empty(), "{stdout}");
 }

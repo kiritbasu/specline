@@ -88,6 +88,21 @@ enum HookCommand {
         )]
         daemon: String,
     },
+
+    /// Tell the agent, once, when it commits work no row describes.
+    ///
+    /// Runs after every Bash call and acts only on a fresh commit whose
+    /// message names no task while the session holds no claim. Advice only:
+    /// it never blocks and never writes (KEEL-395).
+    Commit {
+        /// Daemon base URL. Defaults to `$SPECLINE_DAEMON_URL`, then the local daemon.
+        #[arg(
+            long,
+            env = "SPECLINE_DAEMON_URL",
+            default_value = "http://127.0.0.1:7654"
+        )]
+        daemon: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -688,6 +703,7 @@ fn main() -> Result<()> {
         match which {
             HookCommand::SessionStart { daemon } => hook::session_start(daemon),
             HookCommand::Stop { daemon } => hook::stop(daemon),
+            HookCommand::Commit { daemon } => hook::commit(daemon),
         }
         return Ok(());
     }
