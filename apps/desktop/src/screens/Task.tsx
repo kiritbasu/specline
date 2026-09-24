@@ -50,6 +50,23 @@ interface Related extends Neighbour {
   direction: Direction;
 }
 
+/** Roles that already do something with arrow keys, so this page must not. */
+const ARROW_ROLES = new Set(["listbox", "menu", "slider", "tablist"]);
+
+/**
+ * Whether a key press landed somewhere that already means something —
+ * typing, or a widget that reads arrow keys itself. J/K/Escape/the arrow
+ * navigation (KEEL-405) must all stay out of the way of these, the same way
+ * they already stayed out of a plain `<input>`.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true;
+  if (target.isContentEditable) return true;
+  const role = target.closest("[role]")?.getAttribute("role");
+  return role !== null && role !== undefined && ARROW_ROLES.has(role);
+}
+
 export function TaskScreen({
   route,
   generation,
@@ -122,6 +139,16 @@ export function TaskScreen({
     [context.data, rank],
   );
 
+  // The subset Right/Down/Left/Up walk (KEEL-405): the same board order as J
+  // and K, minus whatever is closed. `done` and `wont_do` are the terminal
+  // statuses everywhere else in this file — see `TaskActions.open` below —
+  // so the filter names them again here rather than inventing a second idea
+  // of "open".
+  const openSiblings = useMemo(
+    () => siblings.filter((t) => !["done", "wont_do"].includes(String(t.status))),
+    [siblings],
+  );
+
   const related = useMemo<Related[]>(() => {
     const out = (core.data?.outbound.neighbours ?? []).map((n) => ({
       ...n,
@@ -138,11 +165,11 @@ export function TaskScreen({
     );
   }, [core.data]);
 
-  // J and K move between tasks without leaving the page; Escape closes it.
+  // J and K move between tasks without leaving the page; Escape closes it;
+  // the arrow keys do the same but skip anything closed (KEEL-405).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+      if (isTypingTarget(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (e.key === "Escape") {
@@ -157,17 +184,41 @@ export function TaskScreen({
       }
 
       const step = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
-      if (step === 0 || !id || siblings.length === 0) return;
-      const at = siblings.findIndex((t) => String(t.id) === id);
+      if (step !== 0) {
+        if (!id || siblings.length === 0) return;
+        const at = siblings.findIndex((t) => String(t.id) === id);
+        if (at === -1) return;
+        const next = siblings[at + step];
+        if (!next) return;
+        e.preventDefault();
+        navigate({ screen: "task", project, taskId: taskRef(key, next) });
+        return;
+      }
+
+      // Right/Down opens the next open task, Left/Up the previous one, in the
+      // board's own order (KEEL-405) — the same list `siblings` walks, with
+      // whatever is closed left out. No wrap: at either end the key does
+      // nothing rather than jumping to the opposite end, which would look
+      // like a random task rather than "there is nothing further this way".
+      const arrowStep =
+        e.key === "ArrowRight" || e.key === "ArrowDown"
+          ? 1
+          : e.key === "ArrowLeft" || e.key === "ArrowUp"
+            ? -1
+            : 0;
+      if (arrowStep === 0) return;
+      if (e.shiftKey) return;
+      if (!id || openSiblings.length === 0) return;
+      const at = openSiblings.findIndex((t) => String(t.id) === id);
       if (at === -1) return;
-      const next = siblings[at + step];
+      const next = openSiblings[at + arrowStep];
       if (!next) return;
       e.preventDefault();
       navigate({ screen: "task", project, taskId: taskRef(key, next) });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [id, project, siblings, key]);
+  }, [id, project, siblings, openSiblings, key]);
 
   if (!id || !project) return <Empty message="No task named." />;
   if (core.loading && !core.data) return <Spinner />;
@@ -264,6 +315,9 @@ export function TaskScreen({
           >
             next →
           </a>
+          <span className="ml-1 border-l border-border-subtle pl-2">
+            ← → to move between open tasks
+          </span>
         </span>
       }
     >

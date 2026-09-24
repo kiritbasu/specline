@@ -451,6 +451,81 @@ describe("the keyboard", () => {
   });
 });
 
+// KEEL-405. Board order is todo (tsk_first, tsk_parent, tsk_kid_b), then
+// in_progress (tsk_me), then done (tsk_last, tsk_kid_a) — the same order J/K
+// walk. The arrow keys walk the same sequence with the done tasks left out,
+// so a closed row is never where they land.
+describe("arrow-key navigation between open tasks", () => {
+  it("Right and Down move to the next open task", async () => {
+    render(
+      <TaskScreen route={{ ...route, taskId: "tsk_kid_b" }} generation={0} />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    window.location.hash = "#/projects/specline/tasks/tsk_kid_b";
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+
+    window.location.hash = "#/projects/specline/tasks/tsk_kid_b";
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+  });
+
+  it("Left and Up move to the previous open task", async () => {
+    await show();
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+
+    window.location.hash = "#/projects/specline/tasks/tsk_me";
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+  });
+
+  // Failure case: at either end the key does nothing rather than wrapping.
+  // Forwards from the in_progress task there is nothing open left — tsk_last
+  // and tsk_kid_a are both done — so ArrowRight also proves the closed pair
+  // gets skipped rather than landing on one of them.
+  it("does nothing at the forward end rather than wrapping or landing on a closed task", async () => {
+    await show();
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+  });
+
+  it("does nothing at the back end rather than wrapping", async () => {
+    render(
+      <TaskScreen route={{ ...route, taskId: "tsk_first" }} generation={0} />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    window.location.hash = "#/projects/specline/tasks/tsk_first";
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_first");
+  });
+
+  // Failure case: an arrow key typed into a field is cursor movement, not a
+  // command to leave the page.
+  it("ignores arrow keys typed into a text field", async () => {
+    await show();
+    const field = document.createElement("input");
+    document.body.append(field);
+    fireEvent.keyDown(field, { key: "ArrowRight" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+    field.remove();
+  });
+
+  // Failure case: a modifier held means the browser or the OS owns the key —
+  // Cmd+Right for "end of line", say — and the page must not also react.
+  it("ignores arrow keys held with a modifier", async () => {
+    await show();
+    fireEvent.keyDown(window, { key: "ArrowLeft", metaKey: true });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+  });
+});
+
 describe("when the rest of the project cannot be loaded", () => {
   // The failure that prompted this: the daemon was briefly down, the task
   // itself rendered from cache, and the page quietly lost its readable
