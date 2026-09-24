@@ -453,17 +453,22 @@ describe("the keyboard", () => {
 
 // KEEL-405. Board order is todo (tsk_first, tsk_parent, tsk_kid_b), then
 // in_progress (tsk_me), then done (tsk_last, tsk_kid_a) — the same order J/K
-// walk. The arrow keys walk the same sequence with the done tasks left out,
-// so a closed row is never where they land.
+// walk. The arrow keys walk that sequence, skipping past anything closed on
+// the way, so a closed row is never where they land — including when it is
+// the one the reader started from.
+
+/** Renders the screen with a chosen task current, and sets the address to match. */
+async function showAt(taskId: string) {
+  render(<TaskScreen route={{ ...route, taskId }} generation={0} />);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  window.location.hash = `#/projects/specline/tasks/${taskId}`;
+}
+
 describe("arrow-key navigation between open tasks", () => {
   it("Right and Down move to the next open task", async () => {
-    render(
-      <TaskScreen route={{ ...route, taskId: "tsk_kid_b" }} generation={0} />,
-    );
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    window.location.hash = "#/projects/specline/tasks/tsk_kid_b";
+    await showAt("tsk_kid_b");
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
 
@@ -473,7 +478,7 @@ describe("arrow-key navigation between open tasks", () => {
   });
 
   it("Left and Up move to the previous open task", async () => {
-    await show();
+    await showAt("tsk_me");
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
 
@@ -482,46 +487,147 @@ describe("arrow-key navigation between open tasks", () => {
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
   });
 
-  // Failure case: at either end the key does nothing rather than wrapping.
-  // Forwards from the in_progress task there is nothing open left — tsk_last
-  // and tsk_kid_a are both done — so ArrowRight also proves the closed pair
-  // gets skipped rather than landing on one of them.
+  // Failure case: at either end the key does nothing rather than wrapping —
+  // proved in the same render as a real move first, so a handler that had
+  // been deleted, or that always did nothing, could not pass this by
+  // accident. Forwards from tsk_me there is nothing open left — tsk_last and
+  // tsk_kid_a are both done — so this also proves the closed pair gets
+  // skipped rather than landed on.
   it("does nothing at the forward end rather than wrapping or landing on a closed task", async () => {
-    await show();
-    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await showAt("tsk_me");
+    const moved = fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+    expect(moved).toBe(false); // a real move: preventDefault was called.
+
+    window.location.hash = "#/projects/specline/tasks/tsk_me";
+    const stayed = fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+    expect(stayed).toBe(true); // nothing prevented: there was nowhere to go.
   });
 
   it("does nothing at the back end rather than wrapping", async () => {
-    render(
-      <TaskScreen route={{ ...route, taskId: "tsk_first" }} generation={0} />,
-    );
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await showAt("tsk_first");
+    const moved = fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_parent");
+    expect(moved).toBe(false);
+
     window.location.hash = "#/projects/specline/tasks/tsk_first";
-    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    const stayed = fireEvent.keyDown(window, { key: "ArrowLeft" });
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_first");
+    expect(stayed).toBe(true);
+  });
+
+  // KEEL-405, review round 2: the current task can itself be closed — a
+  // reader looking at a finished row still gets working arrows — so the
+  // search has to find its real position in board order and step past
+  // anything else closed, rather than refusing because a pre-filtered "open"
+  // list has no entry for where it is.
+  it("finds the previous open task starting from a closed one", async () => {
+    await showAt("tsk_last"); // done, and the current task itself.
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
   });
 
   // Failure case: an arrow key typed into a field is cursor movement, not a
   // command to leave the page.
   it("ignores arrow keys typed into a text field", async () => {
-    await show();
+    await showAt("tsk_kid_b");
     const field = document.createElement("input");
     document.body.append(field);
     fireEvent.keyDown(field, { key: "ArrowRight" });
-    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
     field.remove();
+  });
+
+  // KEEL-405, review round 2. `closest("[role]")` used to find the focused
+  // *item's* role — option, menuitem — and neither is in the set of widgets
+  // that own arrow keys themselves, so the key leaked past the widget to
+  // this page. The fix looks for the container's role instead.
+  it("does not navigate when focus is on a listbox's option", async () => {
+    await showAt("tsk_kid_b");
+    const listbox = document.createElement("div");
+    listbox.setAttribute("role", "listbox");
+    const option = document.createElement("div");
+    option.setAttribute("role", "option");
+    listbox.append(option);
+    document.body.append(listbox);
+    fireEvent.keyDown(option, { key: "ArrowRight" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+    listbox.remove();
   });
 
   // Failure case: a modifier held means the browser or the OS owns the key —
   // Cmd+Right for "end of line", say — and the page must not also react.
   it("ignores arrow keys held with a modifier", async () => {
-    await show();
-    fireEvent.keyDown(window, { key: "ArrowLeft", metaKey: true });
+    await showAt("tsk_kid_b");
+    fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+  });
+
+  // KEEL-405, review round 2: auto-repeat would walk several tasks off one
+  // held key.
+  it("ignores auto-repeat", async () => {
+    await showAt("tsk_kid_b");
+    fireEvent.keyDown(window, { key: "ArrowRight", repeat: true });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+  });
+});
+
+/**
+ * KEEL-405, review round 2. Down and Up are the keys this page's own body
+ * already scrolls with — `overflow-y-auto` in `components/Page.tsx` — so
+ * they must not also move between tasks while there is still something to
+ * scroll that way, and must not scroll the (already-at-the-end) page
+ * instead once there is truly nowhere further to go.
+ */
+describe("Down and Up defer to the scrolling body", () => {
+  function pane(): HTMLElement {
+    const el = document.querySelector(".overflow-y-auto");
+    if (!(el instanceof HTMLElement)) throw new Error("no scrolling pane rendered");
+    return el;
+  }
+
+  function setScroll(scrollTop: number, clientHeight: number, scrollHeight: number) {
+    const el = pane();
+    Object.defineProperty(el, "scrollTop", { configurable: true, value: scrollTop });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: clientHeight });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight });
+  }
+
+  it("does not navigate while the pane can still scroll down, and does once it is at the bottom", async () => {
+    await showAt("tsk_kid_b");
+    setScroll(0, 500, 1000); // top of a long page: not at the bottom yet.
+    const scrolled = fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+    expect(scrolled).toBe(true); // left alone, so the browser scrolls it.
+
+    setScroll(500, 500, 1000); // scrolled all the way down.
+    const moved = fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
-    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    expect(moved).toBe(false);
+  });
+
+  it("does not navigate while the pane can still scroll up, and does once it is at the top", async () => {
+    await showAt("tsk_me");
+    setScroll(200, 500, 1000); // scrolled down some: not at the top yet.
+    const scrolled = fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
+    expect(scrolled).toBe(true);
+
+    setScroll(0, 500, 1000); // back at the top.
+    const moved = fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_kid_b");
+    expect(moved).toBe(false);
+  });
+
+  // A page shorter than its own pane is already at both ends, so Down/Up
+  // must not sit waiting for a scroll that will never happen.
+  it("navigates on Down and Up when the pane is not scrollable at all", async () => {
+    await showAt("tsk_kid_b");
+    setScroll(0, 0, 0);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(window.location.hash).toBe("#/projects/specline/tasks/tsk_me");
   });
 });

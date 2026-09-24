@@ -230,7 +230,10 @@ describe("the ranked Next panel", () => {
     expect(link.getAttribute("href")).toBe("#/projects/specline/tasks/KEEL-3");
   });
 
-  it("is keyboard-reachable: focusable, and Enter opens it", async () => {
+  // Not a press of Enter — jsdom's focus is enough to prove the row is a real
+  // `<a>` reachable by Tab, and a real `<a>` is what the browser opens on
+  // Enter without this page doing anything more.
+  it("is keyboard-reachable: a real link, not just something that looks clickable", async () => {
     await show();
     const link = nextRow(/Delete the file-edit hook/);
     link.focus();

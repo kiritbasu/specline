@@ -9,7 +9,7 @@
  * Everything here already existed in the store. None of it had ever been shown.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type Digest,
@@ -50,21 +50,86 @@ interface Related extends Neighbour {
   direction: Direction;
 }
 
-/** Roles that already do something with arrow keys, so this page must not. */
-const ARROW_ROLES = new Set(["listbox", "menu", "slider", "tablist"]);
+/**
+ * Roles of the *container* widgets that already read arrow keys themselves —
+ * a listbox, a menu, a tree. Deliberately not the roles their items carry
+ * (`option`, `menuitem`, `treeitem`…), because focus during those widgets
+ * sits on the item, and `closest("[role]")` from there used to find the
+ * item's own role first — never a match in this set — and let the arrow
+ * leak past the widget to this page (review round 2 on KEEL-405).
+ */
+const ARROW_WIDGET_SELECTOR =
+  "[role=listbox],[role=menu],[role=menubar],[role=radiogroup],[role=tablist],[role=grid],[role=tree],[role=treegrid],[role=combobox],[role=slider],[role=spinbutton]";
 
 /**
  * Whether a key press landed somewhere that already means something —
- * typing, or a widget that reads arrow keys itself. J/K/Escape/the arrow
- * navigation (KEEL-405) must all stay out of the way of these, the same way
- * they already stayed out of a plain `<input>`.
+ * typing, an open modal, or a widget that reads arrow keys itself. J/K/
+ * Escape/the arrow navigation (KEEL-405) must all stay out of the way of
+ * these, the same way they already stayed out of a plain `<input>`.
  */
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true;
   if (target.isContentEditable) return true;
-  const role = target.closest("[role]")?.getAttribute("role");
-  return role !== null && role !== undefined && ARROW_ROLES.has(role);
+  if (target.closest("dialog[open], details[open]")) return true;
+  return target.closest(ARROW_WIDGET_SELECTOR) !== null;
+}
+
+/** The two terminal statuses, named once rather than spelled out three times. */
+function isClosed(status: unknown): boolean {
+  return ["done", "wont_do"].includes(String(status));
+}
+
+/**
+ * The nearest scrolling ancestor, or `null` if there is none — which reads
+ * the same as "already at both ends" below, so an unscrollable page never
+ * blocks the arrow keys.
+ *
+ * `Page` (`components/Page.tsx`) is what actually scrolls — the class name
+ * is its `overflow-y-auto` wrapper — and it renders no ref of its own, so
+ * this walks up from something inside this screen's own tree to find it.
+ */
+function scrollingPane(from: HTMLElement | null): HTMLElement | null {
+  return from?.closest<HTMLElement>(".overflow-y-auto") ?? null;
+}
+
+/** Whether a pane has nothing further to scroll downward, or is not scrollable at all. */
+function isAtBottom(pane: HTMLElement | null): boolean {
+  if (!pane) return true;
+  return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 1;
+}
+
+/** Whether a pane has nothing further to scroll upward, or is not scrollable at all. */
+function isAtTop(pane: HTMLElement | null): boolean {
+  if (!pane) return true;
+  return pane.scrollTop <= 0;
+}
+
+/**
+ * The next task in board order that is not closed, starting from `fromId`
+ * and walking `step` at a time.
+ *
+ * Walks the *full* order rather than a pre-filtered "open" list, because the
+ * current task itself can be closed — the reader is looking at a finished
+ * row and still wants the arrows to work — and a list with that row already
+ * missing has nowhere to measure "current position" from (review round 2).
+ * Stepping one at a time and skipping anything closed is what lets it start
+ * from a closed row and still land correctly, and also what makes it keep
+ * going past more than one closed task in a row rather than stopping at the
+ * first.
+ */
+function findOpenNeighbour(
+  siblings: Entity[],
+  fromId: string,
+  step: 1 | -1,
+): Entity | undefined {
+  const at = siblings.findIndex((t) => String(t.id) === fromId);
+  if (at === -1) return undefined;
+  for (let i = at + step; i >= 0 && i < siblings.length; i += step) {
+    const candidate = siblings[i];
+    if (candidate && !isClosed(candidate.status)) return candidate;
+  }
+  return undefined;
 }
 
 export function TaskScreen({
@@ -75,6 +140,12 @@ export function TaskScreen({
 }: ScreenProps) {
   const project = route.project;
   const id = route.taskId;
+
+  // Anchors the search for the scrolling pane the arrow keys have to check
+  // before stepping Down or Up (KEEL-405, review round 2) — `Page` owns the
+  // actual `overflow-y-auto` element and forwards no ref of its own, so this
+  // walks up from something inside this screen's tree to find it.
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Five requests, deliberately not folded into one. Each answers a different
   // question of a different part of the store, and the daemon is on localhost
@@ -139,16 +210,6 @@ export function TaskScreen({
     [context.data, rank],
   );
 
-  // The subset Right/Down/Left/Up walk (KEEL-405): the same board order as J
-  // and K, minus whatever is closed. `done` and `wont_do` are the terminal
-  // statuses everywhere else in this file — see `TaskActions.open` below —
-  // so the filter names them again here rather than inventing a second idea
-  // of "open".
-  const openSiblings = useMemo(
-    () => siblings.filter((t) => !["done", "wont_do"].includes(String(t.status))),
-    [siblings],
-  );
-
   const related = useMemo<Related[]>(() => {
     const out = (core.data?.outbound.neighbours ?? []).map((n) => ({
       ...n,
@@ -166,9 +227,14 @@ export function TaskScreen({
   }, [core.data]);
 
   // J and K move between tasks without leaving the page; Escape closes it;
-  // the arrow keys do the same but skip anything closed (KEEL-405).
+  // the arrow keys do the same, skipping anything closed, but only when the
+  // key is not already spoken for (KEEL-405, review round 2).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A widget inside the page that already acted on this key wins —
+      // checked before anything else here, since a `preventDefault` is the
+      // one signal that survives however that widget chose to say "handled".
+      if (e.defaultPrevented) return;
       if (isTypingTarget(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -195,11 +261,6 @@ export function TaskScreen({
         return;
       }
 
-      // Right/Down opens the next open task, Left/Up the previous one, in the
-      // board's own order (KEEL-405) — the same list `siblings` walks, with
-      // whatever is closed left out. No wrap: at either end the key does
-      // nothing rather than jumping to the opposite end, which would look
-      // like a random task rather than "there is nothing further this way".
       const arrowStep =
         e.key === "ArrowRight" || e.key === "ArrowDown"
           ? 1
@@ -207,18 +268,35 @@ export function TaskScreen({
             ? -1
             : 0;
       if (arrowStep === 0) return;
-      if (e.shiftKey) return;
-      if (!id || openSiblings.length === 0) return;
-      const at = openSiblings.findIndex((t) => String(t.id) === id);
-      if (at === -1) return;
-      const next = openSiblings[at + arrowStep];
+      // Auto-repeat would walk several tasks off one held key, and Shift is
+      // somebody selecting text or extending a range, not asking to move.
+      if (e.repeat || e.shiftKey) return;
+
+      // Left/Right always move between tasks. Down/Up are the keys this
+      // page's own body already scrolls with (`overflow-y-auto` in
+      // `components/Page.tsx`), so they only navigate once that pane has
+      // nowhere further to scroll the way they are pointing — otherwise the
+      // key does what it always did. A pane that is not scrollable at all
+      // reads as already at both ends, so it never blocks these.
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const pane = scrollingPane(containerRef.current);
+        const clearToNavigate =
+          e.key === "ArrowDown" ? isAtBottom(pane) : isAtTop(pane);
+        if (!clearToNavigate) return;
+      }
+
+      if (!id) return;
+      const next = findOpenNeighbour(siblings, id, arrowStep);
       if (!next) return;
+      // Only once a task is actually found — a Left/Right at the true end of
+      // the open list is exactly as free to do nothing else as a Down/Up
+      // that chose to scroll instead.
       e.preventDefault();
       navigate({ screen: "task", project, taskId: taskRef(key, next) });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [id, project, siblings, openSiblings, key]);
+  }, [id, project, siblings, key]);
 
   if (!id || !project) return <Empty message="No task named." />;
   if (core.loading && !core.data) return <Spinner />;
@@ -315,8 +393,14 @@ export function TaskScreen({
           >
             next →
           </a>
-          <span className="ml-1 border-l border-border-subtle pl-2">
-            ← → to move between open tasks
+          {/* Decorative — the keys work whether or not this is legible, and
+              nothing else on the page announces a keyboard shortcut to a
+              screen reader either. */}
+          <span
+            aria-hidden="true"
+            className="ml-1 border-l border-border-subtle pl-2"
+          >
+            ←/→ next open task · ↓/↑ too, once scrolled to the end
           </span>
         </span>
       }
@@ -336,7 +420,10 @@ export function TaskScreen({
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div
+        ref={containerRef}
+        className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]"
+      >
         <div className="min-w-0 space-y-5">
           {/* Two fields can hold the description and a row usually has one of
               them, not both. `body` is optional and long-form; `summary` is
@@ -492,9 +579,7 @@ function Family({
   );
   if (!parent && children.length === 0) return null;
 
-  const done = children.filter((t) =>
-    ["done", "wont_do"].includes(String(t.status)),
-  ).length;
+  const done = children.filter((t) => isClosed(t.status)).length;
 
   return (
     <Card title="Part of">
@@ -605,7 +690,7 @@ function EditableFields({
   const [failed, setFailed] = useState<string | null>(null);
 
   const status = String(task.status);
-  const closed = ["done", "wont_do"].includes(status);
+  const closed = isClosed(status);
   const labels = (task.labels as string[] | undefined) ?? [];
   const version = Number(task.audit.version);
 
@@ -811,7 +896,7 @@ function TaskActions({
 }) {
   const [closing, setClosing] = useState(false);
   const [archiving, setArchiving] = useState(false);
-  const open = !["done", "wont_do"].includes(String(task.status));
+  const open = !isClosed(task.status);
   const archived = Boolean(task.audit?.archived_at);
 
   return (
