@@ -738,69 +738,18 @@ fn the_recorded_contracts_classify_against_a_baseline() {
 // agreed to. The cost is real and bounded: rewording a rule is a change to this
 // file, which is reviewed anyway.
 
-/// Where the prose stops and the entries begin in `contracts/BREAKING.md`.
-const ENTRY_MARKER: &str = "<!-- acknowledgements -->";
-
-/// One acknowledged breaking change, parsed from `contracts/BREAKING.md`.
-#[derive(Debug, PartialEq, Eq)]
-struct Acknowledgement {
-    what: String,
-    migration: String,
-    tells_the_user: String,
-}
-
-/// Parse the acknowledgement file.
-///
-/// Markdown rather than TOML or JSON, because the two fields that matter are
-/// prose a human writes for another human, and a format that makes prose
-/// awkward gets prose that is awkward. The shape is fixed enough to check:
-///
-/// ```text
-/// ## <the difference, quoted exactly as the classifier reports it>
-/// - migration: <what handles it, or `none` and why that is alright>
-/// - tells the user: <the sentence they will actually read>
-/// ```
-fn parse_acknowledgements(text: &str) -> Vec<Acknowledgement> {
-    // Everything before the marker is instructions for a human, and its
-    // headings are not entries.
-    //
-    // Found by the control run for this gate: `## How to add one` was being
-    // read as an acknowledgement of a difference called "How to add one",
-    // which then failed as stale and blocked a release that was otherwise
-    // fine. A delimiter is duller than heading levels and cannot be tripped by
-    // someone writing an ordinary document.
-    //
-    // No marker means no entries. That direction matters: a file whose marker
-    // was renamed should gate everything rather than silently acknowledge
-    // nothing, and "nothing is acknowledged" is the failing side.
-    let entries = match text.split_once(ENTRY_MARKER) {
-        Some((_, rest)) => rest,
-        None => return Vec::new(),
-    };
-
-    let mut out: Vec<Acknowledgement> = Vec::new();
-    for line in entries.lines() {
-        let line = line.trim();
-        if let Some(what) = line.strip_prefix("## ") {
-            out.push(Acknowledgement {
-                what: what.trim().to_owned(),
-                migration: String::new(),
-                tells_the_user: String::new(),
-            });
-        // A field line before any heading has nothing to attach to, and is
-        // dropped rather than guessed at.
-        } else if let Some(v) = line.strip_prefix("- migration:")
-            && let Some(last) = out.last_mut()
-        {
-            last.migration = v.trim().to_owned();
-        } else if let Some(v) = line.strip_prefix("- tells the user:")
-            && let Some(last) = out.last_mut()
-        {
-            last.tells_the_user = v.trim().to_owned();
-        }
-    }
-    out
-}
+// `ENTRY_MARKER`, `Acknowledgement`, `parse_acknowledgements` and
+// `breaking_section` used to be defined here a second time, with a subtly
+// different marker rule than `render-breaking-notes.sh`'s: this copy found the
+// marker anywhere in the text (`str::split_once`), the script only on a line
+// by itself. `contracts/BREAKING.md` mentions the marker inline in prose above
+// the real one, so this copy silently read the real entries as instructions.
+// See `crates/specline/tests/common/acknowledgements.rs` for the shared,
+// corrected version and why it is a shared module rather than two disagreeing
+// copies (KEEL-299 review).
+#[path = "common/acknowledgements.rs"]
+mod acknowledgements;
+use acknowledgements::{Acknowledgement, breaking_section, parse_acknowledgements};
 
 /// What the gate decided, so the caller can print all of it at once rather than
 /// stopping at the first problem.
@@ -846,25 +795,6 @@ fn gate(differences: &[Difference], acknowledgements: &[Acknowledgement]) -> Gat
     }
 
     result
-}
-
-/// The Breaking section of the release notes, built from the entries.
-///
-/// This is the payoff. Notes assembled by hand from a week of commits are how a
-/// breaking change reaches users unannounced; notes built from the thing that
-/// already refused to let it merge cannot forget one.
-fn breaking_section(acknowledgements: &[Acknowledgement]) -> String {
-    if acknowledgements.is_empty() {
-        return String::new();
-    }
-    let mut out = String::from("## Breaking\n");
-    for a in acknowledgements {
-        out.push_str(&format!(
-            "\n### {}\n\n{}\n\nMigration: {}\n",
-            a.what, a.tells_the_user, a.migration
-        ));
-    }
-    out
 }
 
 #[test]

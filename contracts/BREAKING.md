@@ -57,10 +57,10 @@ renaming the marker must gate everything rather than wave everything through.
 The **Breaking** section of the release notes is generated from the entries
 below, which is the point of writing them here rather than in a commit message.
 Notes assembled by hand from a week of commits are how a breaking change reaches
-users unannounced; notes built from the thing that already refused to let it
-merge cannot forget one. `scripts/render-breaking-notes.sh` is what does the
-generating — `.github/workflows/release.yml` runs it against this file and
-prepends whatever it prints to the tag's own notes (KEEL-299).
+users unannounced; notes built from the same entries a human wrote down to
+describe the change cannot forget one. `scripts/render-breaking-notes.sh` is
+what does the generating — `.github/workflows/release.yml` runs it against
+this file and prepends whatever it prints to the tag's own notes (KEEL-299).
 
 That script has no idea which release an entry belongs to, because nothing
 below this line says so. It renders every entry under the marker, every time.
@@ -68,10 +68,10 @@ below this line says so. It renders every entry under the marker, every time.
 currently stops you from forgetting — the stale-entry gate above only runs when
 somebody remembers to set `CONTRACTS_BASELINE` — which is exactly how the two
 entries acknowledging the `specline_ready` → `specline_next` rename survived
-three releases (0.4.0 through 0.6.0) after the rename had already shipped,
-undetected until this paragraph removed them. Leaving a shipped entry in place
-does not corrupt anything; it just publishes the same "Breaking" note again on
-the next release, for a change nobody made this time.
+five releases (0.4.0, 0.4.1, 0.5.0, 0.5.1, 0.6.0) after the rename had already
+shipped, undetected until this paragraph removed them. Leaving a shipped entry
+in place does not corrupt anything; it just publishes the same "Breaking" note
+again on the next release, for a change nobody made this time.
 
 <!-- acknowledgements -->
 

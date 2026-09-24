@@ -25,6 +25,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+#[path = "common/acknowledgements.rs"]
+mod acknowledgements;
+use acknowledgements::render_breaking_notes;
+
 fn repo_root() -> PathBuf {
     // CARGO_MANIFEST_DIR is `<root>/crates/specline`.
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -167,18 +171,181 @@ fn the_real_breaking_md_renders_without_error() {
 /// the same way this repo already accepts that its release-only steps are
 /// unverifiable end to end (see release.yml's own comments on what running it
 /// for real would take).
+///
+/// This checks the actual invocation, assembled from its two source lines
+/// (`render-breaking-notes.sh` is called with the path on the line after it),
+/// rather than two independent substrings. Two independent `contains` calls
+/// would both still pass if someone left the mention in this file's own
+/// header comment ("`render-breaking-notes.sh` reads ... contracts/BREAKING.md")
+/// and deleted the call beneath it — release.yml's comments say both words
+/// too, on purpose, so a looser check here would not have caught the bug this
+/// test exists for.
 #[test]
 fn release_yml_still_calls_the_renderer_against_breaking_md() {
     let workflow = std::fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
         .expect("release.yml exists");
 
-    assert!(
-        workflow.contains("scripts/render-breaking-notes.sh"),
-        "release.yml no longer calls the script that renders contracts/BREAKING.md \
-         into the release notes — the Breaking section will silently stop appearing"
+    let call = concat!(
+        r#"scripts/render-breaking-notes.sh" \"#,
+        "\n            ",
+        r#""$GITHUB_WORKSPACE/contracts/BREAKING.md")"#,
     );
     assert!(
-        workflow.contains("contracts/BREAKING.md"),
-        "release.yml no longer points the renderer at contracts/BREAKING.md"
+        workflow.contains(call),
+        "release.yml no longer calls scripts/render-breaking-notes.sh against \
+         contracts/BREAKING.md the way the publish step is supposed to — the \
+         Breaking section will silently stop appearing on releases. Looked for:\n{call}"
     );
+}
+
+// --- the script and the Rust renderer must agree ---------------------------
+//
+// KEEL-299 review: `classify.rs` used to define its own copy of
+// `parse_acknowledgements`, which found the marker with `str::split_once` — a
+// substring search — while this script matches only a whole line. Two parsers
+// of the same file, reading the same real contracts/BREAKING.md differently,
+// and nothing said so because nothing ever ran them against each other. Both
+// now go through `crates/specline/tests/common/acknowledgements.rs`, and this
+// is the test that makes disagreement between the shell and Rust sides visible
+// rather than assumed away by "the shared module says so".
+
+/// A CRLF line ending on the marker line must not hide it. Windows editors
+/// leave these, and the marker existing at all should not depend on which
+/// editor wrote the file.
+#[test]
+fn a_crlf_marker_line_is_still_found() {
+    let out = run("crlf.md");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("### tool `x` was removed"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+/// Trailing whitespace after the marker — a stray space nobody meant to
+/// type — must not hide it either.
+#[test]
+fn a_trailing_space_after_the_marker_is_still_found() {
+    let out = run("trailing-whitespace-marker.md");
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("### tool `y` was removed"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+/// The marker mentioned inline, in prose, above the real one — exactly what
+/// contracts/BREAKING.md itself does — must not be mistaken for it. This is
+/// the fixture that would have failed before classify.rs's parser switched
+/// from a substring search to a whole-line match.
+#[test]
+fn a_marker_mentioned_inline_in_prose_is_not_mistaken_for_the_real_one() {
+    let out = run("inline-mention.md");
+    assert!(out.status.success(), "{}", stderr(&out));
+    let notes = stdout(&out);
+    assert!(notes.contains("### tool `v` was removed"), "{notes}");
+    assert!(
+        !notes.contains("How to add one"),
+        "the prose heading above the real marker must never be read as an entry: {notes}"
+    );
+}
+
+/// A field line with nothing above it to attach to is dropped, not guessed
+/// at — it must not silently become part of the next real entry either.
+#[test]
+fn an_orphan_field_before_any_heading_is_dropped() {
+    let out = run("orphan-field.md");
+    assert!(out.status.success(), "{}", stderr(&out));
+    let notes = stdout(&out);
+    assert!(notes.contains("### tool `z` was removed"), "{notes}");
+    assert!(
+        notes.contains("Migration: none") && !notes.contains("this line has no heading"),
+        "the orphan field must not leak into the real entry's migration: {notes}"
+    );
+}
+
+/// This format has no line-continuation syntax. A second line under a field
+/// is dropped rather than appended, and both sides must agree on that rather
+/// than one of them silently growing the field.
+#[test]
+fn a_multiline_looking_field_keeps_only_its_first_line() {
+    let out = run("multiline-field.md");
+    assert!(out.status.success(), "{}", stderr(&out));
+    let notes = stdout(&out);
+    assert!(notes.contains("Migration: none"), "{notes}");
+    assert!(
+        !notes.contains("continuation line"),
+        "a second line under a field must not be appended to it: {notes}"
+    );
+}
+
+fn read_fixture(name: &str) -> String {
+    std::fs::read_to_string(fixture(name)).expect("fixture reads")
+}
+
+/// The actual point of the shared module: for every fixture this file knows
+/// about, and for the real `contracts/BREAKING.md`, the shell script's stdout
+/// must equal what `render_breaking_notes` (the Rust twin, in
+/// `tests/common/acknowledgements.rs`) computes from the same bytes — and the
+/// two must agree on *whether* it succeeds, not only on what it prints when it
+/// does.
+#[test]
+fn the_script_and_the_rust_renderer_agree() {
+    let fixtures = [
+        "with-entries.md",
+        "no-entries.md",
+        "no-marker.md",
+        "malformed.md",
+        "crlf.md",
+        "trailing-whitespace-marker.md",
+        "inline-mention.md",
+        "orphan-field.md",
+        "multiline-field.md",
+    ];
+
+    for name in fixtures {
+        let out = run(name);
+        let rust_result = render_breaking_notes(&read_fixture(name));
+
+        match rust_result {
+            Ok(rust_notes) => {
+                assert!(
+                    out.status.success(),
+                    "{name}: the script failed but the Rust renderer succeeded: {}",
+                    stderr(&out)
+                );
+                assert_eq!(
+                    stdout(&out),
+                    rust_notes,
+                    "{name}: the script and the Rust renderer disagree on the rendered notes"
+                );
+            }
+            Err(rust_err) => {
+                assert!(
+                    !out.status.success(),
+                    "{name}: the Rust renderer refused ({rust_err}) but the script \
+                     succeeded with: {}",
+                    stdout(&out)
+                );
+            }
+        }
+    }
+
+    // The real file, separately: it is not one of the checked-in fixtures, and
+    // it is the one that actually ships in a release.
+    let out = Command::new(repo_root().join("scripts/render-breaking-notes.sh"))
+        .arg(repo_root().join("contracts/BREAKING.md"))
+        .output()
+        .expect("the script runs");
+    let real_text =
+        std::fs::read_to_string(repo_root().join("contracts/BREAKING.md")).expect("file reads");
+    match render_breaking_notes(&real_text) {
+        Ok(rust_notes) => {
+            assert!(out.status.success(), "{}", stderr(&out));
+            assert_eq!(stdout(&out), rust_notes);
+        }
+        Err(rust_err) => panic!("contracts/BREAKING.md does not render in Rust either: {rust_err}"),
+    }
 }
