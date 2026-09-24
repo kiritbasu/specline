@@ -93,7 +93,9 @@ use crate::store::{
     Blob, DocumentStore, HalfStatus, Page, SearchHit, SearchQuery, SearchReport, SearchResults,
     SearchSource,
 };
-use crate::{BlobId, Document, DocumentDiff, Embedder, EntityId, EntityType, Error, Result};
+use crate::{
+    BlobId, Document, DocumentDiff, Embedder, EntityId, EntityType, Error, NoteId, Result,
+};
 use chrono::{DateTime, Utc};
 use rusqlite::params_from_iter;
 use rusqlite::types::Value;
@@ -439,8 +441,11 @@ impl Store {
             if types.is_empty() {
                 return Ok(Half::skipped(HalfStatus::NoTypesInScope));
             }
+            // Against the type a hit *resolves* to, so a note on a task is
+            // found by a search restricted to tasks — and not by one
+            // restricted to specs.
             filters.push_str(&format!(
-                " AND s.entity_type IN ({})",
+                " AND COALESCE(n.entity_type, s.entity_type) IN ({})",
                 placeholders(types.len())
             ));
             params.extend(types.iter().map(|t| Value::Text(t.as_str().to_owned())));
@@ -449,13 +454,28 @@ impl Store {
         // `bm25()` is negative and lower-is-better, so the score is negated
         // here and ordered descending. This is the sign that ranks the worst
         // match first if it is wrong, and does it plausibly.
+        //
+        // A note is indexed under its own id with `entity_type = 'note'`
+        // (KEEL-339), and resolved here to the row it annotates: the hit's id,
+        // type and title are the parent's, and `note_id` says which note
+        // matched. `'note'` is not an `EntityType`, so it must never reach
+        // `EntityType::parse` below — a single one would fail the row loop and
+        // with it the whole keyword half. The last filter guarantees that: a
+        // marker row whose note cannot be found is not returned at all.
         let sql = format!(
-            "SELECT s.entity_id AS entity_id, s.entity_type AS entity_type, \
-                    s.project_id AS project_id, s.label AS label, s.body AS body, \
+            "SELECT COALESCE(n.entity_id, s.entity_id) AS entity_id, \
+                    COALESCE(n.entity_type, s.entity_type) AS entity_type, \
+                    s.project_id AS project_id, \
+                    CASE WHEN n.id IS NULL THEN s.label \
+                         ELSE COALESCE((SELECT v.label FROM v_entities AS v \
+                                         WHERE v.id = n.entity_id), '') END AS label, \
+                    s.body AS body, n.id AS note_id, \
                     -bm25(fts_entities, {LABEL_WEIGHT}, {BODY_WEIGHT}) AS score \
              FROM fts_entities \
              JOIN fts_source AS s ON s.rowid = fts_entities.rowid \
+             LEFT JOIN notes AS n ON s.entity_type = 'note' AND n.id = s.entity_id \
              WHERE fts_entities MATCH ?{filters} \
+               AND (s.entity_type <> 'note' OR n.id IS NOT NULL) \
              ORDER BY score DESC \
              LIMIT {}",
             query.inner_limit()
@@ -476,17 +496,32 @@ impl Store {
             let context = format!("read column `{c}` of a keyword hit");
             move |source| Error::Storage { context, source }
         };
-        let mut out = Vec::new();
+        let mut out: Vec<SearchHit> = Vec::new();
         while let Some(row) = rows
             .next()
             .map_err(Error::storage("read a keyword search hit"))?
         {
+            let entity_id =
+                EntityId::parse(&row.get::<_, String>("entity_id").map_err(e("entity_id"))?)?;
+            // One hit per row. A task whose title and three of whose notes all
+            // match is one result, not four: the fusion would otherwise add
+            // the duplicates' contributions together and rank a row by how
+            // much has been written about it. Rows arrive best-first, so the
+            // one kept is the best match — note or row, whichever it was.
+            if out.iter().any(|h| h.entity_id == entity_id) {
+                continue;
+            }
             let label: String = row.get("label").map_err(e("label"))?;
             let body: String = row.get("body").map_err(e("body"))?;
+            let note_id = match row
+                .get::<_, Option<String>>("note_id")
+                .map_err(e("note_id"))?
+            {
+                Some(id) => Some(NoteId::parse(&id)?),
+                None => None,
+            };
             out.push(SearchHit {
-                entity_id: EntityId::parse(
-                    &row.get::<_, String>("entity_id").map_err(e("entity_id"))?,
-                )?,
+                entity_id,
                 entity_type: EntityType::parse(
                     &row.get::<_, String>("entity_type")
                         .map_err(e("entity_type"))?,
@@ -502,6 +537,7 @@ impl Store {
                 title: label,
                 score: row.get::<_, f64>("score").unwrap_or_default(),
                 source: SearchSource::Keyword,
+                note_id,
             });
         }
         self.within_dates(out, query).map(Half::ran)
@@ -688,6 +724,7 @@ impl Store {
                 excerpt: excerpt(&body, &query.text),
                 score: similarity,
                 source: SearchSource::Semantic,
+                note_id: None,
             });
         }
         self.within_dates(out, query).map(Half::ran)

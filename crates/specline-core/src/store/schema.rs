@@ -850,6 +850,7 @@ pub fn migrations() -> Vec<Migration> {
     let initial: &'static str = Box::leak(initial_schema().into_boxed_str());
     let archive_prose: &'static str = Box::leak(archive_prose_types().into_boxed_str());
     let passages: &'static str = Box::leak(passages_schema().into_boxed_str());
+    let notes: &'static str = Box::leak(notes_index().into_boxed_str());
     vec![
         Migration {
             id: 1,
@@ -876,8 +877,118 @@ pub fn migrations() -> Vec<Migration> {
             name: "a_session_records_the_client_that_opened_it",
             sql: SESSION_CLIENTS,
         },
+        Migration {
+            id: 6,
+            name: "notes_are_in_the_keyword_index",
+            sql: notes,
+        },
     ]
 }
+
+/// Notes join the keyword index (KEEL-339).
+///
+/// Until this, nothing put a note into `fts_source`, so every finding a session
+/// was told to record as a note — rather than as prose — was unfindable: a
+/// search for an exact sentence from one returned three unrelated decisions.
+/// It also undercut B-91, which lets set-down reasoning live on the signal on
+/// the grounds that both tiers are findable.
+///
+/// **One `fts_source` row per note, keyed by the note's own id.** Folding the
+/// notes into the parent's row would need a third indexed column, which means
+/// dropping and rebuilding both FTS tables and rewriting every existing
+/// trigger — for a result that could no longer say *which* note matched. A row
+/// of its own is additive: new triggers and a backfill, nothing redefined. The
+/// row carries `entity_type = 'note'` as a marker and an empty label; the
+/// search resolves it to the annotated row through `notes`, so a hit always
+/// points at something `specline_get` can open. `'note'` never reaches
+/// `EntityType::parse` — see `store::search::search_keyword`.
+///
+/// **Archiving is handled where it always is: in a trigger, not in a query.**
+/// Retracting a note removes its row; archiving the row a note hangs off
+/// removes all of its notes' rows, because a note "dies with" its row (see
+/// `note.rs`) and a hit that resolves to a put-away row is the resurrection the
+/// other archive triggers exist to prevent. The insert trigger carries the same
+/// guard as `documents_fts_ai`, although the write path already refuses a note
+/// on an archived row — the index should not depend on that staying true.
+///
+/// These rows are deleted, not archived, under the same carve-out as the rest
+/// of `fts_source` (hard constraint 3, B-55): each one is recomputable
+/// byte-for-byte from its note by [`NOTES_BACKFILL`], and
+/// `a_note_index_row_can_always_be_rebuilt_from_its_note` holds that.
+///
+/// Every trigger is dropped before it is created, so the migration is safe to
+/// run on a store that already has them.
+fn notes_index() -> String {
+    let guard = "\
+  WHEN new.archived_at IS NULL
+   AND NOT EXISTS (
+     SELECT 1 FROM v_entities
+      WHERE id = new.entity_id AND archived_at IS NOT NULL
+   )";
+
+    let mut sql = format!(
+        "
+DROP TRIGGER IF EXISTS notes_fts_ai;
+DROP TRIGGER IF EXISTS notes_fts_retracted;
+CREATE TRIGGER notes_fts_ai AFTER INSERT ON notes
+{guard}
+BEGIN
+  INSERT INTO fts_source (entity_id, entity_type, project_id, label, body)
+    VALUES (new.id, 'note', COALESCE(new.project_id, ''), '', new.body)
+  ON CONFLICT(entity_id) DO UPDATE SET
+    body = excluded.body, project_id = excluded.project_id;
+END;
+CREATE TRIGGER notes_fts_retracted AFTER UPDATE OF archived_at ON notes
+  WHEN new.archived_at IS NOT NULL
+BEGIN
+  DELETE FROM fts_source WHERE entity_id = new.id;
+END;
+"
+    );
+
+    // Every table a note can hang off, which is every entity table. Taken
+    // from `EntityType::ALL` rather than hand-listed, so a type added later
+    // cannot quietly leave its notes searchable after it is archived.
+    for ty in crate::EntityType::ALL {
+        let table = ty.table();
+        sql.push_str(&format!(
+            "
+DROP TRIGGER IF EXISTS {table}_notes_fts_archived;
+CREATE TRIGGER {table}_notes_fts_archived AFTER UPDATE OF archived_at ON {table}
+  WHEN new.archived_at IS NOT NULL
+BEGIN
+  DELETE FROM fts_source
+   WHERE entity_type = 'note'
+     AND entity_id IN (SELECT id FROM notes WHERE entity_id = new.id);
+END;
+"
+        ));
+    }
+
+    sql.push_str(NOTES_BACKFILL);
+    sql
+}
+
+/// Put every live note on a live row into the keyword index.
+///
+/// The backfill for stores that held notes before [`notes_index`] existed, and
+/// the definition of what a note's index row *is*: the insert trigger writes
+/// exactly these columns, so running this over an index that is in step changes
+/// nothing — which is the byte-for-byte property the derived-index carve-out
+/// rests on. `DO NOTHING` rather than an upsert, because a row already there
+/// was written by the trigger from the same note and cannot differ.
+const NOTES_BACKFILL: &str = "
+INSERT INTO fts_source (entity_id, entity_type, project_id, label, body)
+SELECT n.id, 'note', COALESCE(n.project_id, ''), '', n.body
+  FROM notes AS n
+ WHERE n.archived_at IS NULL
+   AND NOT EXISTS (
+     SELECT 1 FROM v_entities AS v
+      WHERE v.id = n.entity_id AND v.archived_at IS NOT NULL
+   )
+ ORDER BY n.id
+ON CONFLICT(entity_id) DO NOTHING;
+";
 
 /// One row per conversation, naming the program that drove it (KEEL-360).
 ///

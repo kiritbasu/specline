@@ -1350,6 +1350,16 @@ pub struct SearchHit {
     /// evaluated per index rather than in aggregate — "is the semantic half
     /// earning its keep" is otherwise unanswerable.
     pub source: SearchSource,
+    /// The note that matched, when the match was in a note rather than in the
+    /// row itself (KEEL-339).
+    ///
+    /// The hit still names the annotated row — that is what a caller can open —
+    /// and the excerpt is cut from the note, so this is what tells a reader why
+    /// a task whose title and body say nothing about the query came back.
+    /// Absent from the wire when `None`, so a hit that did not come from a note
+    /// is shaped exactly as it always was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_id: Option<crate::NoteId>,
 }
 
 /// Which index a hit came from.

@@ -829,8 +829,15 @@ fn specline_search(
             query.text
         )];
         for hit in &page.items {
+            // A hit found in a note names the row it annotates, which may say
+            // nothing about the query itself — so say where the match was.
+            let via = hit
+                .note_id
+                .as_ref()
+                .map(|n| format!(" (matched in note {n})"))
+                .unwrap_or_default();
             lines.push(format!(
-                "  [{}] {} — {}\n      {}",
+                "  [{}] {} — {}{via}\n      {}",
                 hit.entity_type, hit.title, hit.entity_id, hit.excerpt
             ));
         }
