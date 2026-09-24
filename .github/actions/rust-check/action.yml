@@ -9,6 +9,15 @@
 name: Rust check
 description: fmt, clippy and the test suite, the same way on every platform.
 
+inputs:
+  snapshots:
+    description: >-
+      Run the suite through `cargo insta test --unreferenced=reject`, so the one
+      run also refuses a snapshot file nothing asserts on any more. Set on one
+      leg only: the check is about files in the repository, not the platform.
+    required: false
+    default: "false"
+
 runs:
   using: composite
   steps:
@@ -37,5 +46,28 @@ runs:
       run: cargo clippy --workspace --all-targets -- -D warnings
 
     - name: Test
+      if: inputs.snapshots != 'true'
       shell: bash
       run: cargo test --workspace
+
+    # The snapshots are the MCP API contract, and `cargo test` already fails
+    # when one differs. What it does not catch is a snapshot file nothing
+    # asserts on any more — left behind by a renamed or deleted test, still
+    # committed, and read by the next person as though it described something
+    # real. `--unreferenced=reject` is the difference between a contract and a
+    # folder of old contracts.
+    #
+    # This used to be its own job, which compiled the workspace and ran the
+    # whole suite a second time on Linux to learn one extra thing (KEEL-410).
+    # `cargo insta test` is `cargo test` with that check added, so the leg that
+    # asks for it runs the suite once and gets both answers.
+    - name: Install cargo-insta
+      if: inputs.snapshots == 'true'
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-insta
+
+    - name: Test, and refuse unreferenced snapshots
+      if: inputs.snapshots == 'true'
+      shell: bash
+      run: cargo insta test --workspace --unreferenced=reject

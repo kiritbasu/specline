@@ -9,6 +9,7 @@
 //! arrives in Phase 1, with the dogfooding switch.
 
 mod bootstrap;
+mod ci;
 mod doctor;
 mod gate;
 mod generate;

@@ -1175,3 +1175,127 @@ fn session_start_says_nothing_extra_when_every_hook_is_wired() {
     let context = injected_context(&stdout);
     assert!(!context.contains("partly set up"), "{context}");
 }
+
+// --- CI status at session start (KEEL-409) ---------------------------------
+//
+// A fake `gh` on PATH, so the real hook runs end to end without GitHub.
+
+/// A directory holding a `gh` that records its arguments to `gh.args` beside
+/// itself and prints `listing`.
+fn fake_gh(listing: &str) -> tempfile::TempDir {
+    fake_gh_script(&format!("cat <<'JSON'\n{listing}\nJSON\n"))
+}
+
+/// A fake `gh` running `body` after recording its arguments.
+fn fake_gh_script(body: &str) -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = scratch();
+    let path = bin.path().join("gh");
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/gh.args\"\n{body}"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+/// Session start in `repo`, with `bin` ahead of the system tools on PATH.
+fn session_start_with_gh(daemon: &str, repo: &std::path::Path, bin: &std::path::Path) -> String {
+    let tmp = scratch();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_specline"))
+        .args(["hook", "session-start", "--daemon", daemon])
+        .env("TMPDIR", tmp.path())
+        .env("CLAUDE_CONFIG_DIR", tmp.path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            serde_json::json!({"cwd": repo.display().to_string(), "session_id": "abc123", "source": "startup"})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    injected_context(&String::from_utf8_lossy(&out.stdout))
+}
+
+const FAILING_RUN: &str = r#"[{"status":"completed","conclusion":"failure","displayTitle":"fix: x","headSha":"abcdef1234","url":"https://github.com/o/r/actions/runs/9","workflowName":"CI"}]"#;
+const PASSING_RUN: &str = r#"[{"status":"completed","conclusion":"success","displayTitle":"fix: x","headSha":"abcdef1234","url":"https://github.com/o/r/actions/runs/9","workflowName":"CI"}]"#;
+
+#[test]
+fn session_start_says_when_the_branch_is_failing_ci() {
+    let repo = repo_with_commit("chore: start", None);
+    let bin = fake_gh(FAILING_RUN);
+    let daemon = stub_daemon(MATCHED, NO_EVENTS);
+
+    let context = session_start_with_gh(&daemon, repo.path(), bin.path());
+
+    assert!(
+        context.contains("do the thing"),
+        "the digest is still there: {context}"
+    );
+    assert!(context.contains("CI is failing on `"), "{context}");
+    assert!(
+        context.contains("https://github.com/o/r/actions/runs/9"),
+        "{context}"
+    );
+
+    // Pushes only, for the branch checked out: a fork's pull request from its
+    // own `main` must not be reported as this repository's `main` failing.
+    let args = std::fs::read_to_string(bin.path().join("gh.args")).unwrap();
+    assert!(args.contains("--event push"), "{args}");
+    assert!(args.contains("--branch "), "{args}");
+}
+
+/// A `gh` that hangs must cost the session a bounded wait, not the digest.
+#[test]
+fn session_start_gives_up_on_a_gh_that_hangs() {
+    let repo = repo_with_commit("chore: start", None);
+    let bin = fake_gh_script("sleep 30\n");
+    let daemon = stub_daemon(MATCHED, NO_EVENTS);
+
+    let started = std::time::Instant::now();
+    let context = session_start_with_gh(&daemon, repo.path(), bin.path());
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "took {:?}",
+        started.elapsed()
+    );
+    assert!(context.contains("do the thing"), "{context}");
+    assert!(!context.contains("CI is failing"), "{context}");
+}
+
+#[test]
+fn session_start_says_nothing_about_ci_that_is_passing() {
+    let repo = repo_with_commit("chore: start", None);
+    let bin = fake_gh(PASSING_RUN);
+    let daemon = stub_daemon(MATCHED, NO_EVENTS);
+
+    let context = session_start_with_gh(&daemon, repo.path(), bin.path());
+
+    assert!(!context.contains("CI is failing"), "{context}");
+}
+
+/// A failing branch in a repository Specline does not know is not its business.
+#[test]
+fn session_start_ignores_ci_outside_a_specline_project() {
+    let repo = repo_with_commit("chore: start", None);
+    let bin = fake_gh(FAILING_RUN);
+    let daemon = stub_daemon(UNMATCHED, NO_EVENTS);
+
+    let context = session_start_with_gh(&daemon, repo.path(), bin.path());
+
+    assert!(!context.contains("CI is failing"), "{context}");
+}

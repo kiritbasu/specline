@@ -60,6 +60,11 @@ fn specline_with_session(home: &Path, session: Option<&str>, args: &[&str]) -> R
         .arg("--home")
         .arg(home)
         .args(args)
+        // Run from the test's own home, not the repository: `specline doctor`
+        // reads the Claude Code settings and asks `gh` about the branch it is
+        // standing in (KEEL-396, KEEL-409), and neither may be this machine's.
+        .current_dir(home)
+        .env("CLAUDE_CONFIG_DIR", home)
         .env_remove("SPECLINE_DAEMON_URL")
         .env_remove("SPECLINE_HOME");
     match session {
@@ -93,6 +98,8 @@ fn specline_with_inbox(home: &Path, args: &[&str]) -> Run {
         .args(args)
         .env("SPECLINE_INBOX", "1")
         .env("SPECLINE_SESSION", "ses_cli_verbs")
+        .current_dir(home)
+        .env("CLAUDE_CONFIG_DIR", home)
         .env_remove("SPECLINE_DAEMON_URL")
         .env_remove("SPECLINE_HOME");
     let output = command.output().expect("run the specline binary");

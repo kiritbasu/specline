@@ -58,7 +58,11 @@ jobs:
       # on. It is also the only leg a fork's pull request gets, which makes it
       # the one that has to be reliable.
       - uses: actions/checkout@v7
+      # The Linux leg also refuses unreferenced snapshot files (KEEL-410),
+      # which is a property of the repository and needs checking only once.
       - uses: ./.github/actions/rust-check
+        with:
+          snapshots: "true"
 
   check-macos:
     name: fmt · clippy · test (macos)
@@ -153,26 +157,6 @@ jobs:
             exit 1
           fi
           echo "no fastembed, no ort"
-
-  snapshots:
-    name: snapshots · no drift, no strays
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-insta
-
-      # The snapshots are the MCP API contract, and `cargo test` already fails
-      # when one differs. What it does not catch is a snapshot file nothing
-      # asserts on any more — left behind by a renamed or deleted test, still
-      # committed, and read by the next person as though it described something
-      # real. `--unreferenced=reject` is the difference between a contract and
-      # a folder of old contracts.
-      - name: Snapshot drift and unreferenced files
-        run: cargo insta test --workspace --unreferenced=reject
 
   deny:
     name: licences · advisories

@@ -25,7 +25,7 @@ It assumes the Specline store on KB's machine. Every `product/` and `.specline/`
 2. Add any decisions you made to the decision log.
 3. Add any new unknowns as question rows.
 4. **Regenerate**: `specline generate specline`. See "Specline is the source of truth" below — the files in `product/` are outputs, and an edit that never reaches Specline is lost on the next run.
-5. Commit. Never leave the tree dirty for the next session.
+5. Commit. Never leave the tree dirty for the next session. If you pushed, check CI for your commit (`gh run list --limit 1`): a push is not done until its run is green. On 2026-09-24 `main` had been red for eight days on one failing job while every session reported its local checks passing (KEEL-408, KEEL-409).
 6. Close with a two-line summary: what landed, what's next.
 
 **If you run out of context mid-task**, update the tracker first with enough detail for a fresh session to resume, then stop. An accurate tracker is more valuable than one more file edited.
@@ -153,6 +153,7 @@ A task is not done until all of these are true:
 - [ ] Public items in `specline-core` have doc comments explaining *why*, not restating the signature
 - [ ] The task **closed in Specline** with `specline_close` — reason `done`, a message saying what happened, and at least one piece of evidence — plus anything learned recorded as a note on it, and `specline generate specline` run
 - [ ] Committed with a message that explains the change, not the diff
+- [ ] **If pushed, CI green on that commit**: `gh run list --limit 1`. The local checks passing and CI passing are two different claims; only one of them is what everyone else sees
 
 **Two words, and they are not interchangeable.** *The checks* are `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. *The review* is reading the code against the five axes. Do not call either of them "the gate": one word for two things that catch different failures is how a session reports that something was verified when the other half never happened.
 

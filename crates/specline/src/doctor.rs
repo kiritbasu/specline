@@ -118,7 +118,8 @@ impl Report {
 
 /// Run every check and print the result.
 pub fn run(home: &Path, daemon: &str, json: bool) -> Result<()> {
-    let report = examine(home, daemon)?;
+    let mut report = examine(home, daemon)?;
+    report.checks.extend(surroundings());
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -428,9 +429,6 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
     // --- The one thing that leaves this machine ---------------------------
     checks.push(update_check());
 
-    // --- The session hooks -------------------------------------------------
-    checks.push(hooks_check());
-
     // --- Backups ----------------------------------------------------------
     checks.push(backup_age(home));
 
@@ -442,6 +440,55 @@ pub fn examine(home: &Path, daemon: &str) -> Result<Report> {
     checks.push(clock_sanity(&store)?);
 
     Ok(Report { checks })
+}
+
+/// The checks that read the machine rather than the store: which Claude Code
+/// hooks are wired (KEEL-396) and whether the branch checked out here is
+/// passing CI (KEEL-409).
+///
+/// Kept out of [`examine`] on purpose. `examine` is the store's own report and
+/// what the tests call; these read `~/.claude` and ask GitHub over the
+/// network, and a test that reads the machine it runs on passes here and fails
+/// somewhere else. `run` adds them for a person at a terminal.
+fn surroundings() -> Vec<Check> {
+    vec![hooks_check(), ci_check()]
+}
+
+/// Whether the branch checked out here is passing CI (KEEL-409).
+///
+/// Degraded, not a problem, when it fails: the store is fine, and doctor's exit
+/// code is about the store. What this catches is the week `main` spent red on
+/// one job while everything else was green and nobody looked.
+fn ci_check() -> Check {
+    let dir = std::env::current_dir().unwrap_or_default();
+    ci_check_for(crate::ci::check(&dir, std::time::Duration::from_secs(10)))
+}
+
+/// [`ci_check`], given what was found — pure, so the tests can reach it.
+fn ci_check_for(state: crate::ci::CiState) -> Check {
+    use crate::ci::CiState;
+    match state {
+        CiState::Passing { branch, runs } => {
+            let names: Vec<String> = runs
+                .iter()
+                .map(|r| format!("{} at {}", r.workflow, r.sha))
+                .collect();
+            Check::ok("ci", format!("`{branch}` is passing: {}", names.join(", ")))
+        }
+        CiState::Failing { branch, failed } => {
+            let names: Vec<String> = failed
+                .iter()
+                .map(|r| format!("{} at {} (\"{}\") {}", r.workflow, r.sha, r.title, r.url))
+                .collect();
+            Check::degraded(
+                "ci",
+                format!("`{branch}` is failing: {}", names.join("; ")),
+                "Open the run, fix what failed, and push again; work pushed on top of a red \
+                 branch is not checked",
+            )
+        }
+        CiState::Unknown(why) => Check::ok("ci", format!("not checked: {why}")),
+    }
 }
 
 /// Whether Specline's three Claude Code hooks are wired, once each (KEEL-396).
@@ -923,6 +970,41 @@ mod tests {
             .filter(|c| c.level == Level::Problem)
             .map(|c| (c.name.as_str(), c.detail.as_str()))
             .collect()
+    }
+
+    // --- ci (KEEL-409) ------------------------------------------------------
+
+    fn run(conclusion: &str) -> crate::ci::Run {
+        crate::ci::Run {
+            workflow: "CI".into(),
+            conclusion: conclusion.into(),
+            title: "fix: x".into(),
+            sha: "abc1234".into(),
+            url: "https://example.invalid/run/1".into(),
+        }
+    }
+
+    #[test]
+    fn a_failing_branch_is_worth_knowing_and_names_the_run() {
+        let check = ci_check_for(crate::ci::judge("main", vec![run("failure")]));
+        assert_eq!(check.level, Level::Degraded);
+        assert!(
+            check.detail.contains("`main` is failing"),
+            "{}",
+            check.detail
+        );
+        assert!(check.detail.contains("https://example.invalid/run/1"));
+    }
+
+    #[test]
+    fn a_passing_or_unknown_branch_is_not_a_finding() {
+        assert_eq!(
+            ci_check_for(crate::ci::judge("main", vec![run("success")])).level,
+            Level::Ok
+        );
+        let unknown = ci_check_for(crate::ci::CiState::Unknown("no gh".into()));
+        assert_eq!(unknown.level, Level::Ok);
+        assert!(unknown.detail.contains("not checked"), "{}", unknown.detail);
     }
 
     // --- hooks (KEEL-396) ----------------------------------------------

@@ -53,8 +53,10 @@ use std::time::Duration;
 /// point — a killed hook prints nothing, which is precisely the silence
 /// [`unreachable_notice`] exists to end. The slow path is this timeout *plus*
 /// `writes::PROBE_TIMEOUT`, so today it is five and one against a ceiling of
-/// ten. Raising either past nine reintroduces the bug through its own fix, and
-/// no test here would fail, because the budget lives in someone else's JSON.
+/// ten. The successful path adds the wiring read and the CI answer on top of
+/// the daemon call — [`WIRING_BUDGET`] and [`CI_BUDGET`] — and
+/// `the_session_start_budget_fits_inside_claude_codes_timeout` holds the sum
+/// under nine, because the ceiling itself lives in someone else's JSON.
 ///
 /// The commit hook has its own, shorter one — see [`COMMIT_TIMEOUT`].
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -292,6 +294,33 @@ fn wiring_notice_within(directory: String, budget: Duration) -> Option<String> {
     rx.recv_timeout(budget).ok().flatten()
 }
 
+/// How long session start waits for the CI answer.
+///
+/// The digest is what matters; a CI line that arrives late is dropped, not
+/// waited for. See [`TIMEOUT`] for the budget this shares.
+const CI_BUDGET: Duration = Duration::from_millis(2500);
+
+/// How long the CI thread itself may take, `git` and `gh` together.
+///
+/// Less than [`CI_BUDGET`] on purpose. The thread kills a child that runs past
+/// this, and it has to do that *before* the hook stops waiting and exits: a
+/// `std::process::Child` is not killed when it is dropped, so a `gh` still
+/// running when the hook returned would be left behind, reparented, holding a
+/// network connection nobody will read.
+const CI_THREAD_LIMIT: Duration = Duration::from_millis(2200);
+
+/// Start asking whether the session's branch is failing CI, on a side thread.
+///
+/// Yields the line to add, or nothing.
+fn ci_status_in_background(directory: String) -> std::sync::mpsc::Receiver<Option<String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let state = crate::ci::check(std::path::Path::new(&directory), CI_THREAD_LIMIT);
+        let _ = tx.send(crate::ci::session_line(&state));
+    });
+    rx
+}
+
 /// Put the digest into the session before anything else does.
 ///
 /// Always exits 0. Prints nothing when the daemon answered and had nothing
@@ -321,10 +350,23 @@ pub fn session_start(daemon: &str) {
             // One line, and only when something is wrong: a hook that is
             // installed and never runs looks exactly like Specline having
             // nothing to say, and nobody runs `doctor` unprompted (KEEL-396).
-            Some(context) => match wiring_notice_within(payload.directory(), WIRING_BUDGET) {
-                Some(notice) => format!("{context}\n\n{notice}"),
-                None => context,
-            },
+            Some(context) => {
+                // Only in a Specline project: a failing branch in some other
+                // repository is not this hook's business, and asking GitHub
+                // about it from every session on the machine would be a
+                // network call per session for nothing (KEEL-409). Started
+                // before the wiring read so the two overlap.
+                let ci = directory_is_a_project(&body)
+                    .then(|| ci_status_in_background(payload.directory()));
+                let context = match wiring_notice_within(payload.directory(), WIRING_BUDGET) {
+                    Some(notice) => format!("{context}\n\n{notice}"),
+                    None => context,
+                };
+                match ci.and_then(|rx| rx.recv_timeout(CI_BUDGET).ok().flatten()) {
+                    Some(line) => format!("{context}\n\n{line}"),
+                    None => context,
+                }
+            }
             None => return,
         },
         None => unreachable_notice(daemon),
@@ -1181,6 +1223,22 @@ mod tests {
         assert_eq!(
             payload.tool_input.unwrap()["command"].as_str(),
             Some("git commit -m x")
+        );
+    }
+
+    /// hooks.json gives session start ten seconds and Claude Code kills the
+    /// hook at that point, printing nothing. Every wait on the successful path
+    /// together has to leave room for starting the process.
+    #[test]
+    fn the_session_start_budget_fits_inside_claude_codes_timeout() {
+        let worst = TIMEOUT + WIRING_BUDGET + CI_BUDGET;
+        assert!(
+            worst < Duration::from_secs(9),
+            "session start could take {worst:?} against a 10s kill"
+        );
+        assert!(
+            CI_THREAD_LIMIT < CI_BUDGET,
+            "the CI thread must kill its child before the hook stops waiting"
         );
     }
 }
