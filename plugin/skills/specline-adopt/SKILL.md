@@ -99,6 +99,11 @@ This is the part no parser can do, which is why you are doing it.
 - **Questions**: only ones that are genuinely open *and* that someone intends to
   answer. See below.
 
+Write what you author here in Simplified Technical English, as the `specline`
+skill describes: short sentences, one idea each, no filler. A task summary says
+what is wrong or wanted, what it affects, and what done looks like. Imported
+documents are different. Import them as they are, and do not rewrite them.
+
 **Look for decisions outside the decisions directory.** This is the part that
 most repays reading rather than parsing. Surveying one real repository for this
 skill turned up nine tidy ADRs in `decisions/` — and a further set buried in

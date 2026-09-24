@@ -94,6 +94,55 @@ still happening.
 
 ---
 
+## Keep the board current
+
+A person reads the board to learn the state of the project. They must not need
+to ask you. So update a row when a fact changes, not at the end of the session.
+
+| When this happens | Do this |
+|---|---|
+| You start work | The task row exists and you claimed it (see above). |
+| You learn something | Add a note to the task. |
+| The scope changes | Update the task summary, or split the task and link the parts. The summary must describe the work you do now. |
+| You are blocked | Draw a `blocks` edge from the blocker to the task, and add a note. |
+| You finish | Close the task with a reason, a message and evidence. |
+| Every task in a milestone is closed | Find out if the milestone shipped (see below). |
+| Something ships | Mark the milestone shipped, and update the environment if a version changed. |
+| The session ends | Each task you touched is closed, or has a note that says where you stopped. |
+
+### Milestones and the roadmap
+
+The roadmap derives a milestone's state from its tasks. When every task is
+closed, the milestone shows as `complete`. `complete` is not `shipped`: the work
+is done, but nobody has said that it was delivered.
+
+- **When it shipped**, `specline_update` the milestone to `status: shipped`.
+  The store sets `shipped_at` to now if you leave it out. Give `shipped_at` when
+  the real date is earlier, for example the time a release was published. Then
+  change the summary to say what shipped.
+- **When it was dropped**, set `status: cut`. Record why in a note or a decision.
+- **When it stopped but will come back**, set `status: paused`.
+- **A release** is a milestone with `kind: release` and a `version_string`.
+  Write it, with its summary, before you tag. The summary is the release notes,
+  so the tracker, the changelog and the published notes use the same words.
+
+Do not leave a milestone `complete` for many sessions. If you do not know
+whether it shipped, ask the human. That is a question about a fact, not a
+request for permission.
+
+### When to summarise
+
+- **At the end of a session**, in the conversation: two lines. What landed, and
+  what is next.
+- **When the human asks for the state, the roadmap or the backlog**, read it
+  from Specline with `specline_context` or `specline_next`. Do not answer from
+  memory. Group by milestone: what shipped, what is active, what is blocked and
+  by what. Link each row. If a list was cut, give the total.
+- **When a task closes**, the close message is the summary. Write it for a
+  person who did not see the work.
+
+---
+
 ## Name an artifact as a link, not as a string
 
 When a tool result carries a `url`, use it: write `[KEEL-42](the url)` rather
@@ -220,6 +269,88 @@ weeks. A decision without its reasoning gets re-argued.
 
 In six months neither you nor the human will remember why. That paragraph is
 the whole point of writing it down.
+
+---
+
+## How to write: Simplified Technical English
+
+Everything you write into Specline is read later, by a person who was not in
+this conversation. Write it in Simplified Technical English (STE).
+
+### The rules
+
+1. **One idea per sentence.** Keep most sentences under 20 words.
+2. **Use the active voice.** Say who or what does the action: "The daemon
+   refuses the write", not "The write is refused".
+3. **Use common words, each in one meaning.** Use the glossary term for a
+   thing, and use the same term every time.
+4. **Say the fact.** No filler, no praise, no hedging. Do not write "it is
+   important to note", "robust", "seamless" or "comprehensive".
+5. **Be specific.** Give the number, the file, the command or the error text:
+   "Startup takes 4 s", not "startup is slow".
+6. **Put the main point first.** Put the reason after it.
+7. **Write what is true.** Do not write what you intend to write.
+8. **Keep other people's words as they said them.** Customer feedback, error
+   messages and quoted documents stay verbatim, in a block quote or a code
+   span. Do not rewrite them into STE.
+
+The store refuses some filler phrases and warns about others. The warning comes
+back with a write that succeeded. If you get a refusal or a warning, rewrite the
+sentence. Do not swap the word for a synonym and keep the same sentence.
+
+### Each kind of row
+
+**Task summary.** One or two sentences: what is wrong or wanted, what it
+affects, and what done looks like.
+
+- Bad: "Improve the board filter to provide a more robust experience."
+- Good: "The board filter resets when the page reloads, so you lose your view.
+  Done when the filter survives a reload."
+
+**Close message.** What changed, and where the evidence is. Say what you did
+not do.
+
+- Bad: "Done! Implemented the feature comprehensively."
+- Good: "The filter is now in the URL, so a reload keeps it. Tested in
+  `board_filter.rs`. The mobile layout is not changed."
+
+**Note.** One finding, and how you know it.
+
+- Bad: "Investigated the issue further."
+- Good: "The router clears query parameters on navigation. That is the cause,
+  not the store. Seen in the debug log."
+
+**Decision.** The context, the decision, the consequences, and what you
+rejected and why.
+
+- Bad: "We decided to go with SQLite as it is the best option."
+- Good: "Use SQLite. Rejected Postgres: it needs a server process, and this is
+  a local tool for one user."
+
+**Question.** One sentence that ends in "?". Then what depends on the answer,
+the options, and what you recommend.
+
+- Bad: "Thoughts on caching?"
+- Good: "Do we cache the digest per project? Each session start now costs
+  300 ms. Options: cache it against the latest event, or do nothing. I
+  recommend nothing until it costs more than 1 s."
+
+**Spec.** What and why, the requirements, and what is out of scope. Give each
+requirement a number (REQ-1, REQ-2), so a task can link to one. One requirement
+per line. Use "must".
+
+- Bad: "The export should be flexible and support a variety of formats."
+- Good: "REQ-1: The export must write one CSV file for each project."
+
+**Milestone or release summary.** One or two sentences, 280 characters at most.
+Say what the phase delivers. When it ships, say what shipped.
+
+- Bad: "A pivotal phase that lays the groundwork for future success."
+- Good: "Each task shows its milestone on the board. Done when no open task is
+  without one."
+
+**Feedback.** The customer's words, verbatim. Your reading goes in a linked
+spec or note, not in the body.
 
 ---
 

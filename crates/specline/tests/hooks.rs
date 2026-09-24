@@ -162,6 +162,29 @@ fn session_start_injects_the_digest_and_pins_the_session_id() {
     assert!(context.contains("ses_abc123"), "{context}");
 }
 
+/// KEEL-375: the writing standard travels with the digest, so a session that
+/// never opens the skill is still told to write plainly.
+#[test]
+fn session_start_tells_the_session_how_to_write() {
+    let dir = scratch();
+    let daemon = stub_daemon(MATCHED, NO_EVENTS);
+
+    let (stdout, code) = run_hook(
+        "session-start",
+        &daemon,
+        r#"{"cwd":"/tmp/x","session_id":"abc123","source":"startup"}"#,
+        dir.path(),
+    );
+
+    assert_eq!(code, 0);
+    let context = injected_context(&stdout);
+    assert!(
+        context.contains("Simplified Technical English (STE)"),
+        "{context}"
+    );
+    assert!(context.contains("`specline` skill has the"), "{context}");
+}
+
 /// A compaction is not a session start, and re-injecting there spends the most
 /// context at the moment there is least.
 #[test]

@@ -44,6 +44,15 @@ const REFUSED: &[(&str, &str)] = &[
     ("navigating the complexities", "say what was hard"),
     ("tapestry", "say what it is"),
     ("underscores the importance", "say why it matters"),
+    // KEEL-375. Each of these is filler with no technical referent: nothing
+    // is ever important to note, fast-paced or a game-changer in a task row.
+    // Only phrases, not single words that also have a plain meaning.
+    ("it is important to note", "just say the thing"),
+    ("it's important to note", "just say the thing"),
+    ("in today's fast-paced", "cut it and start with the fact"),
+    ("game-changer", "say what changes"),
+    ("game changer", "say what changes"),
+    ("cutting-edge", "name the version or the technique"),
 ];
 
 /// Softer tells. Reported, never refused.
@@ -58,6 +67,15 @@ const WARNED: &[(&str, &str)] = &[
     ("plethora", "say roughly how many"),
     ("landscape", "name the thing itself"),
     ("holistic", "say what it includes"),
+    // KEEL-375. Connectors and verbs that pad machine prose but have a plain
+    // use too: "streamline the flags" and "moreover" in a quoted argument are
+    // real. So they warn and the write lands.
+    ("furthermore", "start a new sentence instead"),
+    ("moreover", "start a new sentence instead"),
+    ("empower", "say what it lets someone do"),
+    ("streamline", "say what gets shorter or faster"),
+    // Unhyphenated, it can be a literal edge. Hyphenated, it is refused above.
+    ("cutting edge", "name the version or the technique"),
 ];
 
 /// What a style check found that did not justify refusing the write.
@@ -150,7 +168,9 @@ pub fn check(
     title: Option<&str>,
 ) -> Result<Vec<Warning>> {
     let prose = quotable_stripped(text);
-    let lower = prose.to_lowercase();
+    // A typographic apostrophe is the same word. Without this, "it’s worth
+    // noting" passes where "it's worth noting" is refused.
+    let lower = prose.to_lowercase().replace('\u{2019}', "'");
 
     for (phrase, instead) in REFUSED {
         if lower.contains(phrase) {
@@ -274,6 +294,49 @@ mod tests {
         let warnings = check_body("This is a crucial part of the write path.").unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].found, "crucial");
+    }
+
+    // Failure case for the KEEL-375 additions: filler phrases block the write.
+    #[test]
+    fn filler_phrases_are_refused() {
+        for text in [
+            "It is important to note that the cache is per project.",
+            "This is a game-changer for the board.",
+            "We use a cutting-edge parser.",
+            "In today\u{2019}s fast-paced world, sessions need orientation.",
+        ] {
+            let err = check_body(text).expect_err(text);
+            assert!(err.to_string().contains("house-style banned"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_typographic_apostrophe_does_not_get_round_the_list() {
+        check_body("It\u{2019}s worth noting that the lock is advisory.")
+            .expect_err("a curly apostrophe is the same phrase");
+    }
+
+    // The case that keeps the list honest: technical prose that uses a
+    // borderline word in its plain meaning still lands, with a warning.
+    #[test]
+    fn legitimate_technical_use_warns_but_is_not_blocked() {
+        let warnings = check_body(
+            "Streamline the release flags: the build takes four of them and needs one. \
+             Moreover, two of the four are ignored on Linux.",
+        )
+        .expect("a borderline word must not block a write");
+        let found: Vec<&str> = warnings.iter().map(|w| w.found.as_str()).collect();
+        assert_eq!(found, ["moreover", "streamline"], "{warnings:?}");
+    }
+
+    #[test]
+    fn filler_inside_a_quote_or_code_is_exempt() {
+        let warnings = check_body(
+            "The vendor page says:\n\n> A game-changer for cutting-edge teams.\n\n\
+             The flag is `--streamline`. Neither is our wording.",
+        )
+        .expect("quotation is not authorship");
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]

@@ -169,7 +169,10 @@ what should be captured, drafted it, then asked permission and stopped — so it
 it, then say in one line that you did.\n\n\
 If you pick up one of the tasks under Next below, set it to in_progress before you start. It is \
 one call, and it is the only way the human can see what is being worked on now rather than only \
-what has finished.\n\n";
+what has finished.\n\n\
+Write everything in Specline in Simplified Technical English (STE): short sentences, one idea per \
+sentence, active voice, common words in one meaning, no filler. The `specline` skill has the \
+standard, with examples for each kind of row.\n\n";
 
 /// The line that pins the session id to Claude Code's own.
 ///
@@ -1004,6 +1007,17 @@ mod tests {
         let body = digest("something", json!({"slug": "specline"}));
         let context = session_start_context(&body, Some("11112222")).unwrap();
         assert!(context.contains("ses_11112222"), "{context}");
+    }
+
+    /// KEEL-375: the writing standard reaches every session, not only the
+    /// ones that open the skill (TQ-19 measured that as none).
+    #[test]
+    fn every_session_is_told_to_write_plainly() {
+        let body = digest("something", json!({"slug": "specline"}));
+        let context = session_start_context(&body, None).unwrap();
+        assert!(context.contains("(STE)"), "{context}");
+        assert!(context.contains("one idea per sentence"), "{context}");
+        assert!(context.contains("no filler"), "{context}");
     }
 
     #[test]
