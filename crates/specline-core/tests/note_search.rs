@@ -394,3 +394,126 @@ fn a_note_index_row_can_always_be_rebuilt_from_its_note() {
         "the index row a trigger writes must be exactly what the backfill recomputes"
     );
 }
+
+/// The review finding behind the in-SQL dedupe. With the `LIMIT` applied
+/// before collapsing notes onto their row, one task with more matching notes
+/// than the inner limit filled every slot, collapsed to a single hit, and every
+/// other match in the store vanished behind `total: 1, truncated: false` — a
+/// silent truncation (hard constraint 4).
+#[test]
+fn a_row_with_more_matching_notes_than_the_limit_does_not_crowd_out_the_rest() {
+    let (_d, _p, mut store) = file_store();
+    let prj = project(&mut store, "specline");
+    let noisy = task(&mut store, &prj, "The gecko problem");
+    for i in 0..25 {
+        note(
+            &mut store,
+            &noisy,
+            &format!("gecko gecko finding number {i}"),
+        );
+    }
+    let mut quiet = Vec::new();
+    // Weaker matches: the word once, in a longer title. (The third argument
+    // is the summary, which is not indexed — the title is.)
+    for which in ["first", "second", "third"] {
+        let id = store
+            .create(
+                Task::new(
+                    prj.clone(),
+                    format!("The {which} row, which mentions a gecko once among many words"),
+                    "A row this test needs in the store.",
+                )
+                .into(),
+                &prov(),
+            )
+            .unwrap()
+            .entity
+            .id()
+            .clone();
+        quiet.push(id);
+    }
+
+    // A limit of 5 makes the inner retrieval depth 20 — fewer than the notes.
+    let mut q = SearchQuery::new("gecko");
+    q.limit = 5;
+    assert!(q.inner_limit() < 25, "the fixture must exceed the depth");
+    let page = store.search(&q).unwrap();
+    assert_eq!(page.total, 4, "four rows match: {:?}", page.items);
+    assert!(!page.truncated, "all four fit in a limit of five");
+    let ids: Vec<&EntityId> = page.items.iter().map(|h| &h.entity_id).collect();
+    assert!(ids.contains(&&noisy), "{ids:?}");
+    for id in &quiet {
+        assert!(ids.contains(&id), "a weaker row was crowded out: {ids:?}");
+    }
+
+    // And when the page really is cut, it says so, with the right total.
+    q.limit = 2;
+    let page = store.search(&q).unwrap();
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.total, 4);
+    assert!(page.truncated);
+}
+
+/// Metrics and their observations are not searchable — a search restricted to
+/// them answers "no types in scope" — so a note on one must not make them
+/// appear in an unfiltered search either. They are kept out of the index
+/// itself, so there is no row for any query to forget to filter.
+#[test]
+fn a_note_on_a_row_that_is_not_searchable_is_not_indexed() {
+    let (_d, _p, mut store) = file_store();
+    let prj = project(&mut store, "specline");
+    let metric = store
+        .create(
+            specline_core::Metric::new(prj.clone(), "Latency").into(),
+            &prov(),
+        )
+        .unwrap()
+        .entity
+        .id()
+        .clone();
+    note(&mut store, &metric, "the tuatara measurement drifted");
+
+    assert!(
+        search(&store, "tuatara").is_empty(),
+        "a metric is not searchable, and neither are its notes"
+    );
+    let indexed: i64 = store
+        .connection()
+        .query_row(
+            "SELECT count(*) FROM fts_source WHERE entity_type = 'note'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed, 0);
+}
+
+/// A note hit is the row's hit, so the date window applies to the row's
+/// creation time — documented on `SearchHit::note_id`, pinned here. The row is
+/// backdated so the two readings give different answers.
+#[test]
+fn a_date_window_applies_to_the_row_a_note_annotates_not_the_note() {
+    let (_d, _p, mut store) = file_store();
+    let prj = project(&mut store, "specline");
+    let old = task(&mut store, &prj, "An old row");
+    note(&mut store, &old, "a fresh axolotl finding");
+    store
+        .connection()
+        .execute(
+            "UPDATE tasks SET created_at = '2020-01-01T00:00:00.000000Z' WHERE id = ?1",
+            [old.as_str()],
+        )
+        .unwrap();
+
+    let mut q = SearchQuery::new("axolotl");
+    q.since = Some(chrono::Utc::now() - chrono::Duration::days(1));
+    assert!(
+        store.search(&q).unwrap().items.is_empty(),
+        "the row was created in 2020, whatever the note's date"
+    );
+
+    q.since = Some("2019-12-31T00:00:00Z".parse().unwrap());
+    let hits = store.search(&q).unwrap().items;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].entity_id, old);
+}

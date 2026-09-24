@@ -1358,6 +1358,11 @@ pub struct SearchHit {
     /// a task whose title and body say nothing about the query came back.
     /// Absent from the wire when `None`, so a hit that did not come from a note
     /// is shaped exactly as it always was.
+    ///
+    /// A note hit is the *row's* hit, so [`SearchQuery::since`] and
+    /// [`SearchQuery::until`] apply to the row's creation time, not the note's
+    /// — the same rule that makes a spec revised today not a spec created
+    /// today. "What was found this week" is `specline_activity`'s question.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note_id: Option<crate::NoteId>,
 }

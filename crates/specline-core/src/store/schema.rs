@@ -903,6 +903,15 @@ pub fn migrations() -> Vec<Migration> {
 /// points at something `specline_get` can open. `'note'` never reaches
 /// `EntityType::parse` — see `store::search::search_keyword`.
 ///
+/// **Only notes on searchable rows are indexed** — [`NOTE_PARENTS`], which
+/// leaves out metrics and their observations. Those two are not in the index
+/// themselves, and a search restricted to them answers "no types in scope";
+/// letting their notes in would make an unfiltered search return a type that a
+/// filtered one says cannot be searched. Excluded here, at the index, rather
+/// than by a predicate in the query, for the reason the rest of this index
+/// works that way: what is not in `fts_source` cannot be returned by a query
+/// that forgot to filter.
+///
 /// **Archiving is handled where it always is: in a trigger, not in a query.**
 /// Retracting a note removes its row; archiving the row a note hangs off
 /// removes all of its notes' rows, because a note "dies with" its row (see
@@ -913,18 +922,22 @@ pub fn migrations() -> Vec<Migration> {
 ///
 /// These rows are deleted, not archived, under the same carve-out as the rest
 /// of `fts_source` (hard constraint 3, B-55): each one is recomputable
-/// byte-for-byte from its note by [`NOTES_BACKFILL`], and
+/// byte-for-byte from its note by [`notes_backfill`], and
 /// `a_note_index_row_can_always_be_rebuilt_from_its_note` holds that.
 ///
 /// Every trigger is dropped before it is created, so the migration is safe to
 /// run on a store that already has them.
 fn notes_index() -> String {
-    let guard = "\
+    let parents = note_parent_types();
+    let guard = format!(
+        "\
   WHEN new.archived_at IS NULL
+   AND new.entity_type IN ({parents})
    AND NOT EXISTS (
      SELECT 1 FROM v_entities
       WHERE id = new.entity_id AND archived_at IS NOT NULL
-   )";
+   )"
+    );
 
     let mut sql = format!(
         "
@@ -946,11 +959,7 @@ END;
 "
     );
 
-    // Every table a note can hang off, which is every entity table. Taken
-    // from `EntityType::ALL` rather than hand-listed, so a type added later
-    // cannot quietly leave its notes searchable after it is archived.
-    for ty in crate::EntityType::ALL {
-        let table = ty.table();
+    for (table, _) in NOTE_PARENTS {
         sql.push_str(&format!(
             "
 DROP TRIGGER IF EXISTS {table}_notes_fts_archived;
@@ -965,30 +974,74 @@ END;
         ));
     }
 
-    sql.push_str(NOTES_BACKFILL);
+    sql.push_str(&notes_backfill());
     sql
 }
 
-/// Put every live note on a live row into the keyword index.
+/// The rows whose notes migration 6 indexes: `(table, entity type)`, for every
+/// searchable type as of that migration.
+///
+/// **Frozen, not derived from `EntityType::ALL`.** A migration has to produce
+/// the same SQL for as long as it exists. Built from the enum, a type added
+/// later — with its table created by some migration N > 6 — would make a fresh
+/// store's migration 6 create a trigger on a table that does not exist yet,
+/// and every new install would fail to open a store. It would also do nothing
+/// for existing stores, which applied migration 6 before the type existed.
+///
+/// So a new searchable type does *not* get its notes indexed by this list. The
+/// migration that adds its table must add its trigger too — its own
+/// `{table}_notes_fts_archived` and a widened guard on `notes_fts_ai`.
+/// `note_parents_are_every_searchable_type` fails the moment the enum and this
+/// list disagree, which is what makes that a step nobody can forget.
+const NOTE_PARENTS: &[(&str, &str)] = &[
+    ("projects", "project"),
+    ("milestones", "milestone"),
+    ("tasks", "task"),
+    ("specs", "spec"),
+    ("decisions", "decision"),
+    ("questions", "question"),
+    ("terms", "term"),
+    ("feedback", "feedback"),
+    ("design_artifacts", "design"),
+    ("environments", "environment"),
+    ("artifacts", "artifact"),
+];
+
+/// [`NOTE_PARENTS`]' types as an SQL `IN` list.
+fn note_parent_types() -> String {
+    NOTE_PARENTS
+        .iter()
+        .map(|(_, ty)| format!("'{ty}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Put every live note on a live, searchable row into the keyword index.
 ///
 /// The backfill for stores that held notes before [`notes_index`] existed, and
 /// the definition of what a note's index row *is*: the insert trigger writes
-/// exactly these columns, so running this over an index that is in step changes
-/// nothing — which is the byte-for-byte property the derived-index carve-out
-/// rests on. `DO NOTHING` rather than an upsert, because a row already there
-/// was written by the trigger from the same note and cannot differ.
-const NOTES_BACKFILL: &str = "
+/// exactly these columns under exactly these conditions, so running this over
+/// an index that is in step changes nothing — which is the byte-for-byte
+/// property the derived-index carve-out rests on. `DO NOTHING` rather than an
+/// upsert, because a row already there was written by the trigger from the
+/// same note and cannot differ.
+fn notes_backfill() -> String {
+    let parents = note_parent_types();
+    format!(
+        "
 INSERT INTO fts_source (entity_id, entity_type, project_id, label, body)
 SELECT n.id, 'note', COALESCE(n.project_id, ''), '', n.body
   FROM notes AS n
  WHERE n.archived_at IS NULL
+   AND n.entity_type IN ({parents})
    AND NOT EXISTS (
      SELECT 1 FROM v_entities AS v
       WHERE v.id = n.entity_id AND v.archived_at IS NOT NULL
    )
- ORDER BY n.id
 ON CONFLICT(entity_id) DO NOTHING;
-";
+"
+    )
+}
 
 /// One row per conversation, naming the program that drove it (KEEL-360).
 ///
@@ -1147,6 +1200,27 @@ mod tests {
                 ty.as_str()
             );
         }
+    }
+
+    /// Migration 6's frozen list of note parents has to be exactly the
+    /// searchable types. If this fails because a type was added, the fix is
+    /// not to edit `NOTE_PARENTS` — migration 6 has already run on every
+    /// existing store — but a new migration that indexes the new type's notes,
+    /// and then this test's expectation updated to name both.
+    #[test]
+    fn note_parents_are_every_searchable_type() {
+        let mut expected: Vec<(&str, &str)> = crate::EntityType::ALL
+            .iter()
+            .filter(|t| t.is_searchable())
+            .map(|t| (t.table(), t.as_str()))
+            .collect();
+        let mut frozen: Vec<(&str, &str)> = NOTE_PARENTS.to_vec();
+        expected.sort_unstable();
+        frozen.sort_unstable();
+        assert_eq!(
+            frozen, expected,
+            "a searchable type has no note-index trigger; add a migration for it"
+        );
     }
 
     #[test]

@@ -460,23 +460,48 @@ impl Store {
         // type and title are the parent's, and `note_id` says which note
         // matched. `'note'` is not an `EntityType`, so it must never reach
         // `EntityType::parse` below — a single one would fail the row loop and
-        // with it the whole keyword half. The last filter guarantees that: a
-        // marker row whose note cannot be found is not returned at all.
+        // with it the whole keyword half. The guard on the innermost `WHERE`
+        // makes sure of it: a marker row whose note cannot be found, or has
+        // been retracted, is not returned at all.
+        //
+        // **One hit per resolved row, decided before the `LIMIT`.** A task
+        // whose title and three of whose notes match is one result, not four —
+        // otherwise the fusion adds the duplicates together and ranks a row by
+        // how much has been written about it. The dedupe has to happen in SQL
+        // rather than on the rows that come back: limiting first means a task
+        // with more matching notes than the limit fills every slot, collapses
+        // to one hit, and every other match in the store is silently dropped
+        // with a total of one (hard constraint 4). The best-scoring entry per
+        // row is the one kept; on a tie, the row's own text beats a note.
         let sql = format!(
-            "SELECT COALESCE(n.entity_id, s.entity_id) AS entity_id, \
-                    COALESCE(n.entity_type, s.entity_type) AS entity_type, \
-                    s.project_id AS project_id, \
-                    CASE WHEN n.id IS NULL THEN s.label \
+            "SELECT r.entity_id AS entity_id, r.entity_type AS entity_type, \
+                    r.project_id AS project_id, \
+                    CASE WHEN r.note_id IS NULL THEN r.own_label \
                          ELSE COALESCE((SELECT v.label FROM v_entities AS v \
-                                         WHERE v.id = n.entity_id), '') END AS label, \
-                    s.body AS body, n.id AS note_id, \
-                    -bm25(fts_entities, {LABEL_WEIGHT}, {BODY_WEIGHT}) AS score \
-             FROM fts_entities \
-             JOIN fts_source AS s ON s.rowid = fts_entities.rowid \
-             LEFT JOIN notes AS n ON s.entity_type = 'note' AND n.id = s.entity_id \
-             WHERE fts_entities MATCH ?{filters} \
-               AND (s.entity_type <> 'note' OR n.id IS NOT NULL) \
-             ORDER BY score DESC \
+                                         WHERE v.id = r.entity_id), '') END AS label, \
+                    r.body AS body, r.note_id AS note_id, r.score AS score \
+             FROM ( \
+               SELECT h.*, ROW_NUMBER() OVER ( \
+                        PARTITION BY h.entity_id \
+                        ORDER BY h.score DESC, h.note_id IS NOT NULL, h.note_id \
+                      ) AS best \
+               FROM ( \
+                 SELECT COALESCE(n.entity_id, s.entity_id) AS entity_id, \
+                        COALESCE(n.entity_type, s.entity_type) AS entity_type, \
+                        s.project_id AS project_id, s.label AS own_label, \
+                        s.body AS body, n.id AS note_id, \
+                        -bm25(fts_entities, {LABEL_WEIGHT}, {BODY_WEIGHT}) AS score \
+                 FROM fts_entities \
+                 JOIN fts_source AS s ON s.rowid = fts_entities.rowid \
+                 LEFT JOIN notes AS n \
+                   ON s.entity_type = 'note' AND n.id = s.entity_id \
+                  AND n.archived_at IS NULL \
+                 WHERE fts_entities MATCH ?{filters} \
+                   AND (s.entity_type <> 'note' OR n.id IS NOT NULL) \
+               ) AS h \
+             ) AS r \
+             WHERE r.best = 1 \
+             ORDER BY r.score DESC, r.entity_id \
              LIMIT {}",
             query.inner_limit()
         );
@@ -496,21 +521,13 @@ impl Store {
             let context = format!("read column `{c}` of a keyword hit");
             move |source| Error::Storage { context, source }
         };
-        let mut out: Vec<SearchHit> = Vec::new();
+        let mut out = Vec::new();
         while let Some(row) = rows
             .next()
             .map_err(Error::storage("read a keyword search hit"))?
         {
             let entity_id =
                 EntityId::parse(&row.get::<_, String>("entity_id").map_err(e("entity_id"))?)?;
-            // One hit per row. A task whose title and three of whose notes all
-            // match is one result, not four: the fusion would otherwise add
-            // the duplicates' contributions together and rank a row by how
-            // much has been written about it. Rows arrive best-first, so the
-            // one kept is the best match — note or row, whichever it was.
-            if out.iter().any(|h| h.entity_id == entity_id) {
-                continue;
-            }
             let label: String = row.get("label").map_err(e("label"))?;
             let body: String = row.get("body").map_err(e("body"))?;
             let note_id = match row
