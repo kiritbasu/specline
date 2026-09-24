@@ -548,6 +548,24 @@ jobs:
             exit 1
           fi
 
+          # contracts/BREAKING.md's own header says the release's "Breaking"
+          # section is generated from the entries under its marker — that was
+          # true of nothing until KEEL-299. `render-breaking-notes.sh` reads
+          # the file the same way `classify.rs`'s acknowledgement gate does
+          # and prints the section, or nothing when there is nothing breaking
+          # to say. Prepended, so a reader meets what breaks before the prose
+          # explaining the release, rather than after it.
+          #
+          # A malformed entry (a heading with no migration or no user-facing
+          # sentence) fails the script, and `set -euo pipefail` fails this step
+          # with it — the acknowledgement file gates a release from merging
+          # already; it should not be able to ship a half-written one either.
+          breaking_notes="$("$GITHUB_WORKSPACE/scripts/render-breaking-notes.sh" \
+            "$GITHUB_WORKSPACE/contracts/BREAKING.md")"
+          if [ -n "$breaking_notes" ]; then
+            notes="$(printf '%s\n\n%s' "$breaking_notes" "$notes")"
+          fi
+
           # A prerelease must not become `latest`. The standalone install line
           # in §1 fetches `.../releases/latest/download/specline-installer.sh`, so
           # an rc landing there would become the default download for everyone

@@ -54,7 +54,16 @@ The **Breaking** section of the release notes is generated from the entries
 below, which is the point of writing them here rather than in a commit message.
 Notes assembled by hand from a week of commits are how a breaking change reaches
 users unannounced; notes built from the thing that already refused to let it
-merge cannot forget one.
+merge cannot forget one. `scripts/render-breaking-notes.sh` is what does the
+generating — `.github/workflows/release.yml` runs it against this file and
+prepends whatever it prints to the tag's own notes (KEEL-299).
+
+That script has no idea which release an entry belongs to, because nothing
+below this line says so. It renders every entry under the marker, every time.
+**So delete an entry once the release carrying it has shipped** — an
+acknowledgement left in place after that point does not fail anything, it just
+publishes the same "Breaking" note again on the next release, for a change
+nobody made this time.
 
 <!-- acknowledgements -->
 
