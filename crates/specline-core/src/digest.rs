@@ -365,15 +365,27 @@ impl Digest {
         // Above `Active`, and deliberately: this is a decision somebody owes the
         // project, and the sections below it are orientation. A phase sitting
         // here costs nothing to resolve and is invisible everywhere else.
+        //
+        // Written as a request, because the passive version did not work. It
+        // said the phase "stays here until somebody says which", every session
+        // read it at start, and three phases sat in it for five weeks: a line
+        // addressed to nobody is read as background (KEEL-372).
         if !self.complete.is_empty() {
-            out.push_str("\n## Finished, but not declared\n");
+            out.push_str("\n## Finished — ask the user\n");
             out.push_str(
-                "Every task in these is closed. Whether that means shipped or cut is not \
-                 derivable — `done` and `wont_do` both close a task — so it stays here until \
-                 somebody says which.\n",
+                "Every task in these phases is closed. Whether that means shipped or cut is \
+                 the user's call, not something to infer — `done` and `wont_do` both close a \
+                 task. Ask them once, and record the answer: `specline_update` the milestone \
+                 with `status` set to `shipped` or `cut`, and for shipped, `shipped_at` set to \
+                 the date its last task closed, shown here.\n",
             );
             for i in &self.complete {
-                out.push_str(&format!("- {} {}\n", i.label, i.id));
+                match &i.detail {
+                    Some(detail) => {
+                        out.push_str(&format!("- {} {} — {detail}\n", i.label, i.id));
+                    }
+                    None => out.push_str(&format!("- {} {}\n", i.label, i.id)),
+                }
             }
         }
 
@@ -483,6 +495,12 @@ fn drift_prose(out: &mut String, d: &Drift) {
             d.unknown.len()
         ));
     }
+    if !d.landed_but_open.is_empty() {
+        out.push_str(&format!(
+            " {} open task(s) were named by a commit more than a day ago.",
+            d.landed_but_open.len()
+        ));
+    }
     out.push('\n');
 
     for c in d.unlinked.iter().take(DRIFT_SHOWN) {
@@ -504,6 +522,30 @@ fn drift_prose(out: &mut String, d: &Drift) {
         out.push_str(&format!(
             "- …and {} more task(s) closed done with no commit\n",
             d.done_without_commit.len() - DRIFT_SHOWN
+        ));
+    }
+    // The list with an action attached: a roadmap goes stale one
+    // landed-but-open row at a time (KEEL-372).
+    if !d.landed_but_open.is_empty() {
+        out.push_str(
+            "Still open, though a commit in this window named them over a day ago and the row \
+             has not moved since. If the work is done, close each with `specline_close` citing \
+             the commit; if it is not, say what is left in a note:\n",
+        );
+    }
+    for t in d.landed_but_open.iter().take(DRIFT_SHOWN) {
+        out.push_str(&format!(
+            "- {} {} — named by {} on {}, still open\n",
+            t.reference,
+            t.title,
+            t.commits.join(", "),
+            t.last_named_at.format("%Y-%m-%d")
+        ));
+    }
+    if d.landed_but_open.len() > DRIFT_SHOWN {
+        out.push_str(&format!(
+            "- …and {} more open task(s) named by a commit\n",
+            d.landed_but_open.len() - DRIFT_SHOWN
         ));
     }
     for u in d.unknown.iter().take(DRIFT_SHOWN) {
@@ -743,7 +785,12 @@ pub fn build(
                     commits,
                     total,
                 } => Some(DriftSection::Measured(drift::reconcile(
-                    store, project_id, commits, total, since,
+                    store,
+                    project_id,
+                    commits,
+                    total,
+                    since,
+                    crate::now(),
                 )?)),
             };
             digest.next = suggestions(&line, &digest);
@@ -961,8 +1008,46 @@ fn active_milestones(store: &Store, project: &EntityId, limit: usize) -> Result<
 /// Returned in full, for the caller to cut and report. A phase silently dropped
 /// from this list is the very failure the list exists to end, so it is one of
 /// the places hard constraint 4 has to be honoured rather than assumed.
+///
+/// Each carries when its last task closed, because that is the date the
+/// answer needs: a phase declared shipped today that finished five weeks ago
+/// would put the roadmap's history wrong by five weeks.
 fn complete_milestones(store: &Store, project: &EntityId) -> Result<Vec<Item>> {
-    milestones_in_state(store, project, &[crate::MilestoneState::Complete])
+    let mut items = milestones_in_state(store, project, &[crate::MilestoneState::Complete])?;
+    if items.is_empty() {
+        return Ok(items);
+    }
+    let tasks = store.list(
+        &EntityQuery::in_project(project.clone())
+            .of_type(EntityType::Task)
+            .limited(crate::drift::TASK_SCAN_CAP),
+    )?;
+    for item in &mut items {
+        // Done rows only: a late `wont_do` clean-up is not when the phase
+        // shipped, and an archived row is one somebody set aside.
+        let last = tasks
+            .items
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Task(t)
+                    if t.milestone_id.as_ref() == Some(&item.id)
+                        && t.audit.archived_at.is_none()
+                        && t.close_reason == Some(crate::CloseReason::Done) =>
+                {
+                    t.closed_at
+                }
+                _ => None,
+            })
+            .max();
+        if let Some(last) = last {
+            let tally = item.detail.take().unwrap_or_default();
+            item.detail = Some(format!(
+                "{tally}, the last closed {}",
+                last.format("%Y-%m-%d")
+            ));
+        }
+    }
+    Ok(items)
 }
 
 fn needs_attention(store: &Store, project: &EntityId, limit: usize) -> Result<(Vec<Item>, usize)> {
@@ -1277,6 +1362,13 @@ fn suggestions(line: &ProjectLine, digest: &Digest) -> Vec<String> {
                  `commit:` evidence is what makes the changelog answer \"what shipped\".",
                 d.done_without_commit.len(),
                 d.since.format("%Y-%m-%d")
+            ));
+        }
+        if !d.landed_but_open.is_empty() {
+            out.push(format!(
+                "{} open task(s) were named by a commit over a day ago and not touched since. \
+                 If the work is done, close them — see the Commits section.",
+                d.landed_but_open.len()
             ));
         }
     }

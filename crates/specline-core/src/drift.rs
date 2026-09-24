@@ -24,6 +24,10 @@
 //! a key that has no row, which is usually a typo and occasionally a task
 //! somebody forgot to create.
 //!
+//! And a fifth, the other way round from the third: tasks a commit named that
+//! are still open a day later. The work landed and the row did not move, which
+//! is how a roadmap goes stale without anyone deciding it should (KEEL-372).
+//!
 //! # Not measured is not zero
 //!
 //! A [`Drift`] is built only when there were commits to read. When the project
@@ -183,6 +187,39 @@ pub struct LinkedCommit {
     pub tasks: Vec<String>,
 }
 
+/// An open task whose latest naming commit is more than [`LANDED_GRACE`] old,
+/// and whose row nobody has touched since that commit.
+///
+/// Usually the work landed and nobody closed the row; occasionally the commit
+/// was a first step. Either way it is a question for whoever is looking, not a
+/// verdict, which is why it is reported and never acted on.
+///
+/// Only commits inside the window count, so a task named once and then
+/// forgotten is reported for the length of the window and then drops out. The
+/// digest says "in this window" for that reason; a longer memory would mean
+/// reading more history on every digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LandedButOpen {
+    /// `KEEL-42`.
+    pub reference: String,
+    /// The row.
+    pub id: EntityId,
+    /// Its title.
+    pub title: String,
+    /// The commits that named it, short shas, oldest first.
+    pub commits: Vec<String>,
+    /// When the newest of them landed — the grace is counted from here.
+    pub last_named_at: DateTime<Utc>,
+}
+
+/// How long a task may stay open after a commit names it before it is
+/// reported as landed-but-open.
+///
+/// A commit naming the task you are in the middle of is normal — this project
+/// commits with the key on every change — so a fresh one says nothing. A day
+/// later, a row still open behind a landed commit is worth a question.
+pub const LANDED_GRACE: chrono::Duration = chrono::Duration::days(1);
+
 /// A commit that reached no row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UnlinkedCommit {
@@ -240,6 +277,8 @@ pub struct Drift {
     pub unknown: Vec<UnknownKey>,
     /// Tasks closed `done` in the window with no commit behind them.
     pub done_without_commit: Vec<DoneWithoutCommit>,
+    /// Open tasks a commit in the window named more than [`LANDED_GRACE`] ago.
+    pub landed_but_open: Vec<LandedButOpen>,
     /// How many task rows were read, and how many there are. Unequal only if
     /// the project has more tasks than the scan cap. The store returns the
     /// newest rows first, so past the cap it is the *oldest* tasks that go
@@ -254,7 +293,7 @@ pub struct Drift {
 /// The most rows one reconciliation reads. Well above any project this has
 /// been run on; the point is that a project past it is *told*, through
 /// [`Drift::tasks_total`], rather than quietly under-counted.
-const TASK_SCAN_CAP: usize = 5000;
+pub(crate) const TASK_SCAN_CAP: usize = 5000;
 
 /// The shortest `commit:` evidence that is allowed to match. Git's own
 /// abbreviation floor; shorter than this and `commit:a` would claim every
@@ -287,6 +326,7 @@ pub fn reconcile(
     commits: &[Commit],
     commits_total: usize,
     since: DateTime<Utc>,
+    now: DateTime<Utc>,
 ) -> Result<Drift> {
     let commits_total = commits_total.max(commits.len());
     let key = match store.get(project)? {
@@ -328,6 +368,10 @@ pub fn reconcile(
     // Every task some commit in the window reached, by number. A `done` row
     // in this set has a commit behind it even if its evidence never said so.
     let mut reached: Vec<i32> = Vec::new();
+    // Task number → the commits whose *message* named it, with their times.
+    // Citation as evidence does not count here: a row that cites a commit has
+    // already been closed by somebody who knew about it.
+    let mut named_by: Vec<(i32, String, DateTime<Utc>)> = Vec::new();
 
     for commit in commits {
         let mut numbers: Vec<i32> = Vec::new();
@@ -337,6 +381,7 @@ pub fn reconcile(
                 Named::Number(n) if tasks.iter().any(|t| t.number == n) => {
                     if !numbers.contains(&n) {
                         numbers.push(n);
+                        named_by.push((n, short(&commit.sha), commit.committed_at));
                     }
                 }
                 Named::Number(n) => {
@@ -398,6 +443,32 @@ pub fn reconcile(
         .collect();
     done_without_commit.sort_by_key(|t| std::cmp::Reverse(t.closed_at));
 
+    let mut landed_but_open: Vec<LandedButOpen> = tasks
+        .iter()
+        .filter(|t| t.audit.archived_at.is_none() && t.status.is_open())
+        .filter_map(|t| {
+            let mut named: Vec<&(i32, String, DateTime<Utc>)> =
+                named_by.iter().filter(|(n, _, _)| *n == t.number).collect();
+            named.sort_by_key(|(_, _, at)| *at);
+            // Counted from the *newest* commit. This project puts the key on
+            // every commit, so work going on over three days has a commit a
+            // day, and counting from the first would flag it on day two.
+            let last = named.last()?.2;
+            // And only if nobody has touched the row since. A claim, a note, a
+            // reopen or a status change after the commit is somebody who knew
+            // about the commit and left the row open on purpose.
+            let untouched_since = t.audit.updated_at <= last;
+            (now - last >= LANDED_GRACE && untouched_since).then(|| LandedButOpen {
+                reference: format!("{key}-{}", t.number),
+                id: t.id.clone(),
+                title: t.title.clone(),
+                commits: named.iter().map(|(_, sha, _)| sha.clone()).collect(),
+                last_named_at: last,
+            })
+        })
+        .collect();
+    landed_but_open.sort_by_key(|t| t.last_named_at);
+
     Ok(Drift {
         since,
         commits: commits.len(),
@@ -406,6 +477,7 @@ pub fn reconcile(
         unlinked,
         unknown,
         done_without_commit,
+        landed_but_open,
         tasks_scanned: page.items.len(),
         tasks_total: page.total,
     })

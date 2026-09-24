@@ -143,12 +143,34 @@ fn the_prose_says_which_decision_is_owed() {
 
     let prose = f.digest().to_prose();
     assert!(
-        prose.contains("Finished, but not declared"),
+        prose.contains("Finished — ask the user"),
         "the section is missing:\n{prose}"
     );
     assert!(
         prose.contains("Phase 1 — Spine"),
         "the phase is not named:\n{prose}"
+    );
+}
+
+/// KEEL-372. The passive wording sat unread for five weeks, so the section now
+/// says who to ask, how to record the answer, and the date the answer needs.
+#[test]
+fn the_prose_asks_for_the_decision_and_gives_the_date_it_needs() {
+    // Either side of the setup, so a run that straddles midnight UTC still
+    // finds the date the task actually closed on.
+    let before = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let mut f = setup();
+    f.finished_phase("Phase 1 — Spine");
+    let after = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    let prose = f.digest().to_prose();
+    assert!(prose.contains("Ask them once"), "{prose}");
+    assert!(prose.contains("specline_update"), "{prose}");
+    assert!(prose.contains("shipped_at"), "{prose}");
+    assert!(
+        prose.contains(&format!("the last closed {before}"))
+            || prose.contains(&format!("the last closed {after}")),
+        "each phase carries when its last task closed:\n{prose}"
     );
 }
 

@@ -99,6 +99,7 @@ impl Fixture {
             commits,
             commits.len(),
             self.since(),
+            self.now,
         )
         .unwrap()
     }
@@ -426,12 +427,12 @@ fn a_capped_read_carries_the_total_it_was_cut_from() {
         "chore: newest",
         f.now - Duration::hours(1),
     )];
-    let drift = drift::reconcile(&f.store, &f.project, &one, 40, f.since()).unwrap();
+    let drift = drift::reconcile(&f.store, &f.project, &one, 40, f.since(), f.now).unwrap();
     assert_eq!(drift.commits, 1);
     assert_eq!(drift.commits_total, 40);
     // A total smaller than what was read is a caller's arithmetic error,
     // and the read count is the floor.
-    let drift = drift::reconcile(&f.store, &f.project, &one, 0, f.since()).unwrap();
+    let drift = drift::reconcile(&f.store, &f.project, &one, 0, f.since(), f.now).unwrap();
     assert_eq!(drift.commits_total, 1);
 }
 
@@ -636,4 +637,170 @@ fn a_measured_empty_week_says_none_and_is_not_the_same_as_unmeasured() {
         "measured, and said so"
     );
     assert!(built.to_prose().contains("\nNone.\n"));
+}
+
+// --- landed but open (KEEL-372) ---------------------------------------------
+//
+// Each test builds its own timeline: the row is written first (now, for
+// real), a commit lands after it, and the fixture's clock is moved forward
+// to "later". A commit dated before the row would look like a row touched
+// after its commit, and the test would pass for the wrong reason.
+
+/// A moment just after every row in the fixture was written.
+fn after_the_rows() -> DateTime<Utc> {
+    Utc::now() + Duration::minutes(1)
+}
+
+#[test]
+fn an_open_task_a_commit_named_over_a_day_ago_is_reported() {
+    let mut f = fixture();
+    let key = f.key();
+    let (_, n) = f.task("Ship the thing");
+    let landed = after_the_rows();
+    f.now = landed + Duration::days(2);
+
+    let drift = f.reconcile(&[commit(
+        &sha("aaaaaaa"),
+        &format!("feat: the thing ({key}-{n})"),
+        landed,
+    )]);
+
+    assert_eq!(drift.landed_but_open.len(), 1, "{drift:?}");
+    let t = &drift.landed_but_open[0];
+    assert_eq!(t.reference, format!("{key}-{n}"));
+    assert_eq!(t.commits, vec!["aaaaaaa".to_owned()]);
+}
+
+/// Committing with the key of the task you are working on is normal. A fresh
+/// commit says nothing about whether the row should be closed.
+#[test]
+fn a_task_named_by_a_commit_this_morning_is_not_reported_yet() {
+    let mut f = fixture();
+    let key = f.key();
+    let (_, n) = f.task("Work in progress");
+    let landed = after_the_rows();
+    f.now = landed + Duration::hours(3);
+
+    let drift = f.reconcile(&[commit(
+        &sha("aaaaaaa"),
+        &format!("wip: part one ({key}-{n})"),
+        landed,
+    )]);
+
+    assert!(drift.landed_but_open.is_empty(), "{drift:?}");
+}
+
+/// Work going on over several days: a commit a day, each naming the task. The
+/// grace counts from the newest commit, so it is not flagged mid-work.
+#[test]
+fn a_task_still_being_committed_to_is_not_reported() {
+    let mut f = fixture();
+    let key = f.key();
+    let (_, n) = f.task("Three days of work");
+    let first = after_the_rows();
+    f.now = first + Duration::days(3);
+
+    let drift = f.reconcile(&[
+        commit(&sha("aaaaaaa"), &format!("part one ({key}-{n})"), first),
+        commit(
+            &sha("bbbbbbb"),
+            &format!("part two ({key}-{n})"),
+            f.now - Duration::hours(2),
+        ),
+    ]);
+
+    assert!(drift.landed_but_open.is_empty(), "{drift:?}");
+}
+
+/// A row written after the commit — claimed, noted, reopened, or created —
+/// was left open by somebody who could see the commit.
+#[test]
+fn a_task_touched_after_its_commit_is_not_reported() {
+    let mut f = fixture();
+    let key = f.key();
+    let (_, n) = f.task("Touched since");
+    // The commit is two days before the row was written.
+    let drift = f.reconcile(&[commit(
+        &sha("aaaaaaa"),
+        &format!("feat: first go ({key}-{n})"),
+        f.now - Duration::days(2),
+    )]);
+
+    assert!(drift.landed_but_open.is_empty(), "{drift:?}");
+}
+
+#[test]
+fn closed_and_archived_tasks_are_never_landed_but_open() {
+    let mut f = fixture();
+    let key = f.key();
+    let (closed, c) = f.task("Closed already");
+    let (archived, a) = f.task("Set aside");
+    f.close_with(&closed, CloseReason::Done, &["commit:aaaaaaa"]);
+    f.archive(&archived);
+    let landed = after_the_rows();
+    f.now = landed + Duration::days(3);
+
+    let drift = f.reconcile(&[commit(
+        &sha("aaaaaaa"),
+        &format!("feat: two things ({key}-{c}, {key}-{a})"),
+        landed,
+    )]);
+
+    assert!(drift.landed_but_open.is_empty(), "{drift:?}");
+}
+
+/// Only a commit's own message counts. A commit cited as evidence was cited
+/// by somebody closing a row, so it cannot be why another row is still open.
+#[test]
+fn a_commit_only_cited_as_evidence_does_not_make_a_task_landed_but_open() {
+    let mut f = fixture();
+    f.task("Open, never named");
+    let (closer, _) = f.task("The one that cited it");
+    f.close_with(&closer, CloseReason::Done, &["commit:bbbbbbb"]);
+    let landed = after_the_rows();
+    f.now = landed + Duration::days(3);
+
+    let drift = f.reconcile(&[commit(
+        &sha("bbbbbbb"),
+        "fix: something with no key",
+        landed,
+    )]);
+
+    assert!(drift.landed_but_open.is_empty(), "{drift:?}");
+}
+
+/// The digest reads the real clock, so this builds the reconciliation with
+/// the fixture's clock and hands it to the digest to render.
+#[test]
+fn the_digest_asks_to_close_a_landed_but_open_task() {
+    let mut f = fixture();
+    let key = f.key();
+    let (_, n) = f.task("Landed long ago");
+    let landed = after_the_rows();
+    f.now = landed + Duration::days(2);
+    let drift = f.reconcile(&[commit(
+        &sha("aaaaaaa"),
+        &format!("feat: done ({key}-{n})"),
+        landed,
+    )]);
+    assert_eq!(drift.landed_but_open.len(), 1, "{drift:?}");
+
+    let mut d = digest::build(
+        &f.store,
+        Some(&f.project),
+        Depth::Standard,
+        None,
+        Surfaces::default(),
+        Source::NoCheckout,
+    )
+    .unwrap();
+    d.drift = Some(DriftSection::Measured(drift));
+    let prose = d.to_prose();
+
+    assert!(prose.contains("still open"), "{prose}");
+    assert!(prose.contains(&format!("{key}-{n}")), "{prose}");
+    assert!(
+        prose.contains("specline_close"),
+        "the line says what to do: {prose}"
+    );
 }
