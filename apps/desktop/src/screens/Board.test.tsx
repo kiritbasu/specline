@@ -210,6 +210,32 @@ describe("the ranked Next panel", () => {
     expect(screen.getByText("Next")).toBeTruthy();
     expect(screen.getByText("KEEL-3")).toBeTruthy();
   });
+
+  // KEEL-260. Each row looked like every other clickable row on the screen and
+  // was not one — a `<li>` with no `<a>` inside it, so nothing happened on
+  // click and nothing was reachable by Tab.
+  //
+  // The card for the same task is also on the board underneath, so the row
+  // is found inside the "Next" section specifically rather than by name
+  // alone, which would match both.
+  function nextRow(name: string | RegExp): HTMLElement {
+    const heading = screen.getByText("Next");
+    const section = heading.closest("section") as HTMLElement;
+    return within(section).getByRole("link", { name });
+  }
+
+  it("opens the task when a row is clicked, the same as everywhere else", async () => {
+    await show();
+    const link = nextRow(/Delete the file-edit hook/);
+    expect(link.getAttribute("href")).toBe("#/projects/specline/tasks/KEEL-3");
+  });
+
+  it("is keyboard-reachable: focusable, and Enter opens it", async () => {
+    await show();
+    const link = nextRow(/Delete the file-edit hook/);
+    link.focus();
+    expect(document.activeElement).toBe(link);
+  });
 });
 
 describe("the two layouts", () => {

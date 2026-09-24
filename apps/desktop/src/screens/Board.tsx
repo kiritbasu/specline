@@ -367,17 +367,30 @@ export function BoardScreen({
             </h2>
             <ol className="space-y-1">
               {ready.slice(0, 3).map((item, i) => (
-                <li key={item.id} className="flex gap-2 text-small">
-                  <span className="w-3 shrink-0 text-right tabular-nums text-ink-faint">
-                    {i + 1}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="mr-1.5 font-mono text-micro text-ink-faint">
-                      {item.reference}
+                <li key={item.id}>
+                  {/* A real link, not a row that looked like one — KEEL-260.
+                      Opens the same task the same way a card or the full
+                      Ready list does, and is reachable by keyboard the way
+                      any `<a>` is: Tab lands on it, Enter opens it. */}
+                  <a
+                    href={href({
+                      screen: "task",
+                      project,
+                      taskId: item.reference || item.id,
+                    })}
+                    className="flex gap-2 rounded-control text-small hover:underline"
+                  >
+                    <span className="w-3 shrink-0 text-right tabular-nums text-ink-faint">
+                      {i + 1}
                     </span>
-                    {item.title}{" "}
-                    <span className="text-ink-faint">— {item.why}</span>
-                  </span>
+                    <span className="min-w-0">
+                      <span className="mr-1.5 font-mono text-micro text-ink-faint">
+                        {item.reference}
+                      </span>
+                      {item.title}{" "}
+                      <span className="text-ink-faint">— {item.why}</span>
+                    </span>
+                  </a>
                 </li>
               ))}
             </ol>
