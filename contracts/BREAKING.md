@@ -1,9 +1,13 @@
 # Breaking changes, acknowledged
 
 Every breaking difference the classifier finds has to appear below the marker in
-this file before a release can merge. CI fails otherwise, and it fails in both
-directions: a breaking change with no entry, and an entry describing nothing
-that changed.
+this file before a release can merge. That gate — `the_real_release_is_gated_when_a_baseline_is_named`
+in `crates/specline/tests/classify.rs` — fails in both directions: a breaking
+change with no entry, and an entry describing nothing that changed. **It only
+runs when `CONTRACTS_BASELINE` is set**, and nothing in CI sets it yet, so
+right now it is a command someone has to remember to run by hand against the
+previous tag before cutting a release — not yet something a release can fail
+on without a person choosing to check.
 
 This is the mechanism. The version number is decoration — on 0.x, additive and
 breaking both mean a minor bump, so a gate that checked the number would be
@@ -60,18 +64,14 @@ prepends whatever it prints to the tag's own notes (KEEL-299).
 
 That script has no idea which release an entry belongs to, because nothing
 below this line says so. It renders every entry under the marker, every time.
-**So delete an entry once the release carrying it has shipped** — an
-acknowledgement left in place after that point does not fail anything, it just
-publishes the same "Breaking" note again on the next release, for a change
-nobody made this time.
+**So delete an entry once the release carrying it has shipped.** Nothing in CI
+currently stops you from forgetting — the stale-entry gate above only runs when
+somebody remembers to set `CONTRACTS_BASELINE` — which is exactly how the two
+entries acknowledging the `specline_ready` → `specline_next` rename survived
+three releases (0.4.0 through 0.6.0) after the rename had already shipped,
+undetected until this paragraph removed them. Leaving a shipped entry in place
+does not corrupt anything; it just publishes the same "Breaking" note again on
+the next release, for a change nobody made this time.
 
 <!-- acknowledgements -->
-
-## tool `specline_ready` was removed
-- migration: call `specline_next`, which takes the same arguments and returns the same shape with a `group` field added
-- tells the user: `specline_ready` is now `specline_next`. Same arguments, same answer — it just says what it is for rather than what it filters on.
-
-## 4 line(s) disappeared, e.g. `===== ready =====`, `Open work with nothing live in its way. Ordered by what a task unblocks before its priority, so a p1 that releases three others comes above a p0 that releases nothing.`, `Usage: specline ready [OPTIONS] <PROJECT>`
-- migration: none — `specline ready` still runs, as an alias of `specline next`
-- tells the user: the command is `specline next` now. `specline ready` keeps working, so anything in a shell history or a script is safe.
 

@@ -154,3 +154,31 @@ fn the_real_breaking_md_renders_without_error() {
         stderr(&out)
     );
 }
+
+/// The regression this task is actually named for: KEEL-299 was not the
+/// script being wrong, it was `release.yml` never calling anything. Every
+/// test above would keep passing if someone deleted the two lines that wire
+/// the script into the workflow — this is the one that fails instead.
+///
+/// A string match on the workflow source, not a run of the workflow itself:
+/// nothing here can execute `release.yml` (it needs a pushed tag and a
+/// self-hosted runner), so this pins the one fact a `cargo test` run can
+/// check — that the publish step still reaches for the script and the file —
+/// the same way this repo already accepts that its release-only steps are
+/// unverifiable end to end (see release.yml's own comments on what running it
+/// for real would take).
+#[test]
+fn release_yml_still_calls_the_renderer_against_breaking_md() {
+    let workflow = std::fs::read_to_string(repo_root().join(".github/workflows/release.yml"))
+        .expect("release.yml exists");
+
+    assert!(
+        workflow.contains("scripts/render-breaking-notes.sh"),
+        "release.yml no longer calls the script that renders contracts/BREAKING.md \
+         into the release notes — the Breaking section will silently stop appearing"
+    );
+    assert!(
+        workflow.contains("contracts/BREAKING.md"),
+        "release.yml no longer points the renderer at contracts/BREAKING.md"
+    );
+}
